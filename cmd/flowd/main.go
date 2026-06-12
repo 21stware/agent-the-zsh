@@ -11,22 +11,15 @@
 package main
 
 import (
-	"context"
-	"errors"
 	"flag"
-	"fmt"
 	"log"
 	"net"
 	"os"
 	"os/signal"
-	"strings"
 	"syscall"
-	"time"
 
 	"github.com/oboo/terflow/internal/config"
 	"github.com/oboo/terflow/internal/daemon"
-	"github.com/oboo/terflow/internal/llm"
-	"github.com/oboo/terflow/internal/translate"
 )
 
 func main() {
@@ -58,49 +51,17 @@ func main() {
 	// ~/.claude/settings.json. The NL path is enabled only when a credential is
 	// present; otherwise NL verdicts degrade to accept and flow stays a
 	// transparent zsh. Credentials are never logged.
+	// The daemon does only instant CMD-vs-NL classification. NL is handed to
+	// flow-agent (which does translation/routing/answering itself), so the
+	// daemon needs no LLM client or model — just whether a credential is
+	// configured, to decide if the agent path is available. Credentials are
+	// never logged.
 	cfg := config.Load()
 	if cfg.Enabled() {
-		opts := []llm.Option{llm.WithBaseURL(cfg.BaseURL)}
-		if cfg.AuthToken != "" {
-			opts = append(opts, llm.WithAuthToken(cfg.AuthToken))
-		}
-		client := llm.New(cfg.APIKey, opts...)
-
-		// The translator now ROUTES (command vs agent vs question) in addition to
-		// translating, so it needs the capable model — a fast model can't reliably
-		// judge A/B and tends to emit prose instead of a command. Prefer the
-		// configured capable model, then the fast model, then discovery.
-		routeModel := cfg.Model
-		if routeModel == "" {
-			routeModel = cfg.FastModel
-		}
-		if routeModel == "" {
-			// No model configured: discover one from the provider so the same
-			// build works against any compatible endpoint (GLM/DeepSeek/gateway).
-			m, err := pickModel(client)
-			if err != nil {
-				// Loud, source-aware diagnostic. A 401 here almost always means a
-				// stale/foreign credential is shadowing the right one — name the
-				// source so the user knows which env var / file to fix.
-				log.Printf("flowd: NL translation DISABLED — could not reach %s using %s: %v",
-					cfg.BaseURL, cfg.Source, err)
-				if isAuthError(err) {
-					log.Printf("flowd: this looks like an auth failure. flow is using %s. "+
-						"If that credential is wrong, unset the stray env var (e.g. ANTHROPIC_API_KEY) "+
-						"or set ANTHROPIC_MODEL to skip discovery.", cfg.Source)
-				}
-			} else {
-				routeModel = m
-				log.Printf("flowd: auto-selected model %q from %s/v1/models", routeModel, cfg.BaseURL)
-			}
-		}
-		if routeModel != "" {
-			srv.SetTranslator(translate.New(client, routeModel))
-			log.Printf("flowd: NL translation enabled — endpoint=%s auth=%s model=%q",
-				cfg.BaseURL, cfg.Source, routeModel)
-		}
+		srv.SetAgentEnabled(true)
+		log.Printf("flowd: agent (NL) path enabled — endpoint=%s auth=%s", cfg.BaseURL, cfg.Source)
 	} else {
-		log.Printf("flowd: no LLM credential (ANTHROPIC_AUTH_TOKEN/API_KEY) — NL translation disabled, NL verdicts will accept")
+		log.Printf("flowd: no LLM credential (ANTHROPIC_AUTH_TOKEN/API_KEY) — NL degrades to running the line as-is")
 	}
 
 	// Graceful shutdown: closing the unix listener removes the socket file.
@@ -119,40 +80,4 @@ func main() {
 		}
 		log.Printf("flowd: serve stopped: %v", err)
 	}
-}
-
-// isAuthError reports whether err is an HTTP 401/403 from the provider — the
-// signature of a wrong or foreign credential.
-func isAuthError(err error) bool {
-	var apiErr *llm.APIError
-	if errors.As(err, &apiErr) {
-		return apiErr.Status == 401 || apiErr.Status == 403
-	}
-	return false
-}
-
-// pickModel discovers a model from the provider when none is configured. Since
-// the translator now also routes (command vs agent vs question), it prefers a
-// capable tier (opus/sonnet) for reliable judgment, falling back to any model.
-// Works across Anthropic-compatible providers.
-func pickModel(client *llm.Client) (string, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-	models, err := client.ListModels(ctx)
-	if err != nil {
-		return "", err
-	}
-	if len(models) == 0 {
-		return "", fmt.Errorf("provider returned no models")
-	}
-	// Preference order: capable tiers first (routing needs judgment), then any.
-	prefer := []string{"opus", "sonnet", "gpt-5", "gpt-4", "pro", "haiku", "mini", "flash"}
-	for _, p := range prefer {
-		for _, m := range models {
-			if strings.Contains(strings.ToLower(m.ID), p) {
-				return m.ID, nil
-			}
-		}
-	}
-	return models[0].ID, nil
 }

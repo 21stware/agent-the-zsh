@@ -4,11 +4,12 @@ A zsh smart input layer. You type in your own zsh as usual; on Enter:
 
 - **Shell command** → runs immediately, zero latency, exactly as if flow were
   not installed.
-- **Natural language** → (step 3+) translated to a command and written back
-  into your input line for you to confirm.
+- **Natural language** → your typed text stays on its line and the agent runs
+  inline below it: it translates+runs a single command, does multi-step work, or
+  answers a question — streaming thinking and output after the prompt.
 
 flow deliberately does **not** emulate a terminal. It only takes over the
-judgment and rewriting of a single input line.
+judgment of a single input line: run it as a command, or hand it to the agent.
 
 ## Status
 
@@ -19,29 +20,29 @@ judgment and rewriting of a single input line.
   `flowd` daemon classifies each line over a unix socket; the zsh widget
   (`shell/flow.zsh`) accepts commands immediately and degrades to plain zsh if
   the daemon is unavailable. Local round-trip ~70µs.
-- **Step 3 — NL→command translation (mode A)** ✅
+- **Step 3 — NL handling** ✅
   Self-built Anthropic client (`internal/llm`: raw HTTP/JSON + SSE, no SDK).
-  `internal/translate` turns NL into one shell command via a fast model,
-  streaming, and classifies its blast radius (read-only vs side-effect). The
-  daemon returns `action=replace` for NL; the widget writes the command back to
-  the buffer and waits for the user's Enter (never auto-runs). No API key →
-  NL degrades to `accept`; the command path never touches the network.
-- Step 4 — Esc Esc undo + side-effect marker ✅
-  Esc Esc restores the original NL input after a translation. Side-effecting
-  translations (rm, mv, git push…) show a `⚠` tag below the line; read-only
-  ones show `✓`. Per the "mark, don't block" choice, Enter still runs the line —
-  the tag is a visual cue, not a gate. `command_not_found` is left as plain zsh.
+  Natural language is handed to the agent (mode B); the agent decides whether to
+  run one command, do multi-step work, or answer a question. No API key →
+  NL degrades to running the line as-is; the command path never touches the
+  network.
+- Step 4 — agent permission gate ✅
+  The agent's per-tool-call gate enforces the review level: read-only tools run
+  optimistically; side-effecting ones are gated (focused asks only on high-risk;
+  strict asks on everything; yolo never asks). `command_not_found` is plain zsh.
 - Mode B — self-built agent loop ✅
-  Natural language auto-routes three ways from one input: a real command runs
-  instantly; a one-command request is translated (mode A); a multi-step task is
-  routed to the agent (mode B) — the model itself decides A vs B. The agent
-  (`cmd/flow-agent`, foreground TTY) runs a tool-use loop (bash/read_file/
-  write_file/edit/grep) in the current directory, with a per-tool-call
-  permission gate: reads are optimistic, and side-effecting calls are gated by a
-  review level (strict / focused / yolo; default focused asks only on high-risk:
-  rm, git push, sudo, writes outside the tree, …). At an approval prompt:
-  y=run, n=reject, a=allow-all-this-task, s=switch-to-strict. `FLOW_REVIEW` sets
-  the default level; `FLOW_AGENT_CMD` points the widget at the agent binary.
+  The daemon does only instant CMD-vs-NL classification (zero latency, no
+  network). A command runs as-is; natural language is handed to the agent. The
+  agent (`cmd/flow-agent`, foreground TTY) runs **inline below your typed line**
+  — translation is just one of its moves: it may run a single command, do
+  multi-step work, or answer a question, streaming thinking + output after the
+  prompt. Tool-use loop (bash/read_file/write_file/edit/grep) in the current
+  directory, with a per-tool-call permission gate: reads are optimistic,
+  side-effecting calls are gated by a review level (strict / focused / yolo;
+  default focused asks only on high-risk: rm, git push, sudo, writes outside the
+  tree, …). At an approval prompt: y=run, n=reject, a=allow-all-this-task,
+  s=switch-to-strict. `FLOW_REVIEW` sets the level; `FLOW_AGENT_CMD` points the
+  widget at the agent binary.
 
 ## Try it (UAT)
 

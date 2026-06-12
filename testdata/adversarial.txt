@@ -1,0 +1,99 @@
+# Hand-built adversarial / gray-zone samples for the flow classifier.
+# Format: <label>\t<input>
+# label is CMD or NL. Lines starting with # and blank lines are ignored.
+# These are the cases that matter most: ambiguous first words, NL embedded in
+# real commands, Chinese NL, and bare commands. Design rule: when ambiguous,
+# lean CMD. Misclassifying a command as NL is far worse than the reverse.
+
+# --- command verbs that are also English verbs, used as real commands ---
+CMD	make
+CMD	make build
+CMD	make -j8 all
+CMD	find . -name "*.go"
+CMD	find / -type f -size +100M
+CMD	time go test ./...
+CMD	sort -u file.txt
+CMD	uniq -c
+CMD	touch newfile.txt
+CMD	kill -9 1234
+CMD	yes | rm -i x
+CMD	history | grep ssh
+CMD	test -f /etc/hosts
+CMD	echo done
+CMD	printf "%s\n" hi
+CMD	date +%s
+CMD	jobs -l
+CMD	which python
+
+# --- the same verbs used as natural language (English sentence) ---
+NL	make the project build faster
+NL	find my ssh config file
+NL	find out which process is using port 8080
+NL	time how long the build takes
+NL	sort these files by modification time
+NL	kill the process listening on 3000
+NL	touch base with the server and check status
+NL	show me the largest files here
+NL	list all running docker containers
+NL	test whether the api endpoint is reachable
+NL	echo the current git branch name
+
+# --- real commands whose ARGS contain English/NL text (must stay CMD) ---
+CMD	git commit -m "fix the bug where users cannot log in please"
+CMD	echo "show me the files"
+CMD	grep "list all the things" notes.txt
+CMD	git commit -m "add the feature to list all users"
+CMD	curl -d "please process this" https://api.example.com
+CMD	printf "how do I do this\n"
+
+# --- bare commands and short aliases (must stay CMD) ---
+CMD	ls
+CMD	ll
+CMD	g st
+CMD	k get pods
+CMD	vim
+CMD	htop
+CMD	cd ..
+CMD	z proj
+CMD	..
+CMD	-
+
+# --- piped / structured shell that has no NL strong signals ---
+CMD	cat access.log | awk '{print $1}' | sort | uniq -c | sort -rn
+CMD	for f in *.txt; do mv "$f" "${f%.txt}.md"; done
+CMD	docker ps -a --format '{{.Names}}'
+CMD	ps aux | grep -v grep | grep node
+CMD	export ANTHROPIC_API_KEY=sk-xxx
+CMD	FOO=bar ./run.sh
+
+# --- clear English NL (must be NL) ---
+NL	how do I undo the last git commit
+NL	what is using all my disk space
+NL	delete all node_modules folders under this directory
+NL	rename every jpeg to lowercase
+NL	please compress this folder into a tarball
+NL	can you show me the open network connections
+NL	convert all png images in this folder to webp
+NL	what processes are listening on tcp ports
+
+# --- Chinese NL (must be NL) ---
+NL	把日志按时间排序
+NL	帮我看看磁盘还剩多少空间
+NL	列出所有正在运行的容器
+NL	删除当前目录下所有的临时文件
+NL	查找占用 8080 端口的进程
+NL	把这个文件夹打包成 tar.gz
+NL	显示最近修改过的十个文件
+NL	帮我把所有 png 转成 webp
+
+# --- Chinese that embeds a command word but is still NL ---
+NL	帮我 grep 一下包含 error 的行
+NL	用 git 把改动提交了
+NL	能不能 ls 看看这里有什么
+
+# --- tricky: looks like NL but is a valid command invocation ---
+CMD	man find
+CMD	tldr tar
+CMD	brew install ripgrep
+CMD	pip install requests
+CMD	go get ./...

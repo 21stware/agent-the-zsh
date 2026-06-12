@@ -1,0 +1,317 @@
+`awk '{print $5}' {{path/to/file}}`
+`awk '/{{foo}}/ {print $2}' {{path/to/file}}`
+`awk -F ',' '{print $NF}' {{path/to/file}}`
+`awk '{s+=$1} END {print s}' {{path/to/file}}`
+`awk 'NR%3==1' {{path/to/file}}`
+`awk '{if ($1 == "foo") print "Exact match foo"; else if ($1 ~ "bar") print "Partial match bar"; else print "Baz"}' {{path/to/file}}`
+`awk '($10 >= {{min_value}} && $10 <= {{max_value}})' {{path/to/file}}`
+`awk 'BEGIN {FS=":";printf "%-20s %6s %25s\n", "Name", "UID", "Shell"} $4 >= 1000 {printf "%-20s %6d %25s\n", $1, $4, $7}' /etc/passwd`
+`cat {{path/to/file}}`
+`cat {{path/to/file1 path/to/file2 ...}} > {{path/to/output_file}}`
+`cat {{path/to/file1 path/to/file2 ...}} >> {{path/to/output_file}}`
+`cat -u {{/dev/tty12}} > {{/dev/tty13}}`
+`cat - > {{path/to/file}}`
+`chmod u+x {{path/to/file}}`
+`chmod u+rw {{path/to/file_or_directory}}`
+`chmod g-x {{path/to/file}}`
+`chmod a+rx {{path/to/file}}`
+`chmod o=g {{path/to/file}}`
+`chmod o= {{path/to/file}}`
+`chmod {{[-R|--recursive]}} g+w,o+w {{path/to/directory}}`
+`chmod {{[-R|--recursive]}} a+rX {{path/to/directory}}`
+`sudo chown {{user}} {{path/to/file_or_directory}}`
+`sudo chown {{user}}:{{group}} {{path/to/file_or_directory}}`
+`sudo chown {{user}}: {{path/to/file_or_directory}}`
+`chown :{{group}} {{path/to/file_or_directory}}`
+`sudo chown {{[-R|--recursive]}} {{user}} {{path/to/directory}}`
+`sudo chown {{[-h|--no-dereference]}} {{user}} {{path/to/symlink}}`
+`sudo chown --reference {{path/to/reference_file}} {{path/to/file_or_directory}}`
+`cp {{path/to/source_file}} {{path/to/target_file}}`
+`cp {{path/to/source_file}} {{path/to/target_parent_directory}}`
+`cp {{[-r|--recursive]}} {{path/to/source_directory}} {{path/to/target_directory}}`
+`cp {{[-vr|--verbose --recursive]}} {{path/to/source_directory}} {{path/to/target_directory}}`
+`cp {{[-t|--target-directory]}} {{path/to/destination_directory}} {{path/to/file1 path/to/file2 ...}}`
+`cp {{[-i|--interactive]}} {{*.ext}} {{path/to/target_directory}}`
+`cp {{[-L|--dereference]}} {{link}} {{path/to/target_directory}}`
+`cp --parents {{source/path/to/file}} {{path/to/target_file}}`
+`curl {{https://example.com}}`
+`curl {{[-L|--location]}} {{[-D|--dump-header]}} - {{https://example.com}}`
+`curl {{[-O|--remote-name]}} {{https://example.com/filename.zip}}`
+`curl {{[-X|--request]}} POST {{[-d|--data]}} '{{name=bob}}' {{http://example.com/form}}`
+`curl {{[-k|--insecure]}} {{[-x|--proxy]}} {{http://127.0.0.1:8080}} {{[-H|--header]}} '{{Authorization: Bearer token}}' {{[-X|--request]}} {{GET|PUT|POST|DELETE|PATCH|...}} {{https://example.com}}`
+`curl {{[-d|--data]}} '{{{"name":"bob"}}}' {{[-H|--header]}} '{{Content-Type: application/json}}' {{http://example.com/users/1234}}`
+`curl {{[-E|--cert]}} {{client.pem}} --key {{key.pem}} {{[-k|--insecure]}} {{https://example.com}}`
+`curl {{[-v|--verbose]}} --resolve {{example.com}}:{{80}}:{{127.0.0.1}} {{http://example.com}}`
+`{{command}} | cut {{[-c|--characters]}} 5`
+`cut {{[-c|--characters]}} 5-10 {{path/to/file}}`
+`cut {{[-f|--fields]}} 2,6 {{path/to/file}}`
+`{{command}} | cut {{[-d|--delimiter]}} "{{delimiter}}" {{[-f|--fields]}} 2-`
+`{{command}} | cut {{[-d|--delimiter]}} " " {{[-f|--fields]}} -3`
+`{{command}} | cut {{[-d|--delimiter]}} "{{:}}" {{[-f|--fields]}} {{1}} {{[-s|--only-delimited]}}`
+`{{find . -print0}} | cut {{[-z|--zero-terminated]}} {{[-d|--delimiter]}} "{{/}}" {{[-f|--fields]}} {{2}}`
+`date +%c`
+`date {{[-u|--utc]}} +%Y-%m-%dT%H:%M:%S%Z`
+`date +%s`
+`date {{[-d|--date]}} @{{1473305798}}`
+`date {{[-d|--date]}} "{{2018-09-01 00:00}}" +%s {{[-u|--utc]}}`
+`date --rfc-3339 {{date|seconds|ns}}`
+`sudo date {{093023592021.59}}`
+`date +%V`
+`df`
+`df {{path/to/file_or_directory}}`
+`df -k`
+`df -P`
+`docker {{[ps|container ls]}} {{[-a|--all]}}`
+`docker {{[run|container run]}} --name {{container_name}} {{image}}`
+`docker container {{start|stop}} {{container_name}}`
+`docker {{[pull|image pull]}} {{image}}`
+`docker {{[images|image ls]}}`
+`docker {{[exec|container exec]}} {{[-it|--interactive --tty]}} {{container_name}} {{sh}}`
+`docker {{[rm|container rm]}} {{container1 container2 ...}}`
+`docker {{[logs|container logs]}} {{[-f|--follow]}} {{container_name}}`
+`du -{{b|k|m}} {{path/to/directory}}`
+`du {{[-h|--human-readable]}} {{path/to/directory}}`
+`du {{[-sh|--summarize --human-readable]}} {{path/to/directory}}`
+`du {{[-ah|--all --human-readable]}} {{path/to/directory}}`
+`du {{[-h|--human-readable]}} {{[-d|--max-depth]}} {{n}} {{path/to/directory}}`
+`du {{[-ch|--total --human-readable]}} *.jpg`
+`du {{[-ah|--all --human-readable]}} {{[-t|--threshold]}} {{1G|1024M|1048576K}} .[^.]* *`
+`ffmpeg -i {{path/to/video.mp4}} -vn {{path/to/sound.mp3}}`
+`ffmpeg -i {{path/to/input_audio.flac}} -ar 44100 -sample_fmt s16 {{path/to/output_audio.wav}}`
+`ffmpeg -i {{path/to/video.mp4}} {{[-vf|-filter:v]}} 'scale=-1:1000' -r 15 {{path/to/output.gif}}`
+`ffmpeg -i {{path/to/frame_%d.jpg}} -f image2 {{video.mpg|video.gif}}`
+`ffmpeg -i {{path/to/input_video.mp4}} -ss {{mm:ss}} -to {{mm2:ss2}} {{[-c|-codec]}} copy {{path/to/output_video.mp4}}`
+`ffmpeg -i {{path/to/input_video}}.avi {{[-c|-codec]}}:a aac -b:a 128k {{[-c|-codec]}}:v libx264 -crf 23 {{path/to/output_video}}.mp4`
+`ffmpeg -i {{path/to/input_video}}.mkv {{[-c|-codec]}} copy {{path/to/output_video}}.mp4`
+`ffmpeg -i {{path/to/input_video}}.mp4 {{[-c|-codec]}}:v libvpx-vp9 -crf {{30}} -b:v 0 {{[-c|-codec]}}:a libopus -vbr on -threads {{number_of_threads}} {{path/to/output_video}}.webm`
+`find {{path/to/directory}} -name '{{*.ext}}'`
+`find {{path/to/directory}} -path '{{*/path/*/*.ext}}' -or -name '{{*pattern*}}'`
+`find {{path/to/directory}} -type d -iname '{{*lib*}}'`
+`find {{path/to/directory}} -name '{{*.py}}' -not -path '{{*/site-packages/*}}'`
+`find {{path/to/directory}} -maxdepth 1 -size {{+500k}} -size {{-10M}}`
+`find {{path/to/directory}} -name '{{*.ext}}' -exec {{wc -l}} {} \;`
+`find {{path/to/directory}} -daystart -mtime {{-1}} -exec {{tar -cvf archive.tar}} {} \+`
+`find {{path/to/directory}} -type {{f|d}} -empty -delete -print`
+`gcc {{path/to/source1.c path/to/source2.c ...}} {{[-o|--output]}} {{path/to/output_executable}}`
+`gcc {{path/to/source.c}} -Wall {{[-o|--output]}} {{output_executable}}`
+`gcc {{path/to/source.c}} -Wall {{[-g|--debug]}} -Og {{[-o|--output]}} {{path/to/output_executable}}`
+`gcc {{path/to/source.c}} {{[-o|--output]}} {{path/to/output_executable}} -I{{path/to/header}} -L{{path/to/library}} -l{{library_name}}`
+`gcc {{[-S|--assemble]}} {{path/to/source.c}}`
+`gcc {{[-c|--compile]}} {{path/to/source.c}}`
+`gcc {{path/to/source.c}} -O{{1|2|3|fast}} {{[-o|--output]}} {{path/to/output_executable}}`
+`gcc --version`
+`git init`
+`git clone {{https://example.com/repo.git}}`
+`git status`
+`git add {{[-A|--all]}}`
+`git commit {{[-m|--message]}} {{message_text}}`
+`git push`
+`git pull`
+`git reset --hard; git clean {{[-f|--force]}}`
+`go get {{path/to/package}}`
+`go run {{file}}.go`
+`go build -o {{executable}} {{file}}.go`
+`go build`
+`go test`
+`go install`
+`go mod init {{module_name}}`
+`grep "{{search_pattern}}" {{path/to/file1 path/to/file2 ...}}`
+`grep {{[-F|--fixed-strings]}} "{{exact_string}}" {{path/to/file}}`
+`grep {{[-rI|--recursive --binary-files=without-match]}} "{{search_pattern}}" {{path/to/directory}}`
+`grep {{--context|--before-context|--after-context}} 3 "{{search_pattern}}" {{path/to/file}}`
+`grep {{[-Hn|--with-filename --line-number]}} --color=always "{{search_pattern}}" {{path/to/file}}`
+`grep {{[-o|--only-matching]}} "{{search_pattern}}" {{path/to/file}}`
+`cat {{path/to/file}} | grep {{[-v|--invert-match]}} "{{search_pattern}}"`
+`grep {{[-Ei|--extended-regexp --ignore-case]}} "{{search_pattern}}" {{path/to/file}}`
+`head -n {{count}} {{path/to/file}}`
+`jq '.' {{path/to/file.json}}`
+`{{cat path/to/file.json}} | jq {{[-f|--from-file]}} {{path/to/script.jq}}`
+`{{cat path/to/file.json}} | jq {{--arg "name1" "value1" --arg "name2" "value2" ...}} '{{. + $ARGS.named}}'`
+`{{cat path/to/multiple_json_file_*.json}} | jq '{{{newKey1: .key1, newKey2: .key2.nestedKey, ...}}}'`
+`{{cat path/to/file.json}} | jq '{{.[index1], .[index2], ...}}'`
+`{{cat path/to/file.json}} | jq '.[]'`
+`{{cat path/to/file.json}} | jq '.[] | select((.key1=="value1") and .key2=="value2")'`
+`{{cat path/to/file.json}} | jq '. {{+|-}} {{{"key1": "value1", "key2": "value2", ...}}}'`
+`kill {{process_id}}`
+`kill -l`
+`kill {{[-1|-HUP]}} {{process_id}}`
+`kill {{[-2|-INT]}} {{process_id}}`
+`kill {{[-9|-KILL]}} {{process_id}}`
+`kill {{[-19|-STOP]}} {{process_id}}`
+`kill -SIGUSR1 -{{group_id}}`
+`kubectl get {{pods|service|deployment|ingress|...}} {{[-o|--output]}} wide`
+`kubectl label pods {{name}} unhealthy=true`
+`kubectl get all`
+`kubectl top {{pods|nodes}}`
+`kubectl cluster-info`
+`kubectl explain {{pods.spec.containers}}`
+`kubectl logs {{pod_name}}`
+`kubectl exec {{pod_name}} -- {{ls /}}`
+`ln {{[-s|--symbolic]}} /{{path/to/file_or_directory}} {{path/to/symlink}}`
+`ln {{[-s|--symbolic]}} {{path/to/file_or_directory}} {{path/to/symlink}}`
+`ln {{[-sf|--symbolic --force]}} /{{path/to/new_file}} {{path/to/symlink}}`
+`ln /{{path/to/file}} {{path/to/hardlink}}`
+`ls -1`
+`ls {{[-a|--all]}}`
+`ls {{[-F|--classify]}}`
+`ls {{[-la|-l --all]}}`
+`ls {{[-lh|-l --human-readable]}}`
+`ls {{[-lSR|-lS --recursive]}}`
+`ls {{[-ltr|-lt --reverse]}}`
+`ls {{[-d|--directory]}} */`
+`lsof {{path/to/file}}`
+`lsof -i :{{port}}`
+`lsof -t {{path/to/file}}`
+`lsof -u {{username}}`
+`lsof -c {{process_or_command_name}}`
+`lsof -p {{pid}}`
+`lsof +D {{path/to/directory}}`
+`lsof -i6TCP:{{port}} -sTCP:LISTEN -n -P`
+`make`
+`make {{install|check|clean|uninstall|...}}`
+`make {{[-j|--jobs]}} 4 {{target}}`
+`make {{[-f|--file]}} {{path/to/file}}`
+`make {{[-C|--directory]}} {{path/to/directory}}`
+`make {{[-B|--always-make]}} {{target}}`
+`make {{target}} {{variable}}={{new_value}}`
+`make {{[-e|--environment-overrides]}} {{target}}`
+`mkdir {{path/to/directory1 path/to/directory2 ...}}`
+`mkdir {{[-p|--parents]}} {{path/to/directory1 path/to/directory2 ...}}`
+`mkdir {{[-m|--mode]}} {{rwxrw-r--}} {{path/to/directory1 path/to/directory2 ...}}`
+`mkdir {{[-p|--parents]}} {{path/to/{a,b}/{x,y,z}/{h,i,j}}}`
+`mv {{path/to/source}} {{path/to/target}}`
+`mv {{path/to/source}} {{path/to/existing_directory}}`
+`mv {{path/to/source1 path/to/source2 ...}} {{path/to/existing_directory}}`
+`mv {{[-f|--force]}} {{path/to/source}} {{path/to/target}}`
+`mv {{[-i|--interactive]}} {{path/to/source}} {{path/to/target}}`
+`mv {{[-n|--no-clobber]}} {{path/to/source}} {{path/to/target}}`
+`mv {{[-v|--verbose]}} {{path/to/source}} {{path/to/target}}`
+`{{find /var/log -type f -name '*.log' -print0}} | {{xargs -0}} mv {{[-t|--target-directory]}} {{path/to/target_directory}}`
+`node {{path/to/file}}`
+`node`
+`node --watch {{path/to/file}}`
+`node {{[-e|--eval]}} "{{code}}"`
+`node {{[-p|--print]}} "process.versions"`
+`node --no-lazy --inspect-brk {{path/to/file}}`
+`npm init {{[-y|--yes]}}`
+`npm {{[i|install]}}`
+`npm {{[i|install]}} {{package_name}}@{{version}}`
+`npm {{[i|install]}} {{package_name}} {{[-D|--save-dev]}}`
+`npm {{[i|install]}} {{package_name}} {{[-g|--global]}}`
+`npm {{[r|uninstall]}} {{package_name}}`
+`npm {{[ls|list]}}`
+`npm {{[ls|list]}} {{[-g|--global]}} --depth {{0}}`
+`ping 10.0.0.1`
+`ping -c {{count}} {{host}}`
+`ping -i {{seconds}} {{host}}`
+`ping -n {{host}}`
+`ping -a {{host}}`
+`ping -O {{host}}`
+`ping -c {{count}} -W {{seconds}} -w {{seconds}} {{host}}`
+`ps aux`
+`ps auxww`
+`ps aux | grep {{[s]tring}}`
+`ps {{[-u|--user]}} $(id {{[-u|--user]}}) -F`
+`ps {{[-u|--user]}} $(id {{[-u|--user]}}) f`
+`ps {{[-o|--format]}} ppid= {{[-p|--pid]}} {{pid}}`
+`ps --sort size`
+`python`
+`python {{path/to/file.py}}`
+`python -i {{path/to/file.py}}`
+`python -c "{{expression}}"`
+`python -m {{module}} {{arguments}}`
+`python -m pip install {{package}}`
+`python -m pdb {{path/to/file.py}}`
+`python -m http.server`
+`rm {{path/to/file1 path/to/file2 ...}}`
+`rm {{[-f|--force]}} {{path/to/file1 path/to/file2 ...}}`
+`rm {{[-i|--interactive]}} {{path/to/file1 path/to/file2 ...}}`
+`rm {{[-v|--verbose]}} {{path/to/file1 path/to/file2 ...}}`
+`rm {{[-r|--recursive]}} {{path/to/file_or_directory1 path/to/file_or_directory2 ...}}`
+`rm {{[-d|--dir]}} {{path/to/directory}}`
+`rsync {{path/to/source}} {{path/to/destination}}`
+`rsync {{[-a|--archive]}} {{path/to/source}} {{path/to/destination}}`
+`rsync {{[-zvhP|--compress --verbose --human-readable --partial --progress]}} {{path/to/source}} {{path/to/destination}}`
+`rsync {{[-r|--recursive]}} --fsync {{path/to/source}} {{path/to/destination}}`
+`rsync {{[-r|--recursive]}} {{path/to/source}}/ {{path/to/destination}}`
+`rsync {{[-auL|--archive --update --copy-links]}} {{path/to/source}} {{path/to/destination}}`
+`rsync {{[-r|--recursive]}} --delete rsync://{{host}}:{{path/to/source}} {{path/to/destination}}`
+`rsync {{[-e|--rsh]}} 'ssh -p {{port}}' --info=progress2 {{host}}:{{path/to/source}} {{path/to/destination}}`
+`{{command}} | sed 's/apple/mango/g'`
+`{{command}} | sed -f {{path/to/script.sed}}`
+`{{command}} | sed -n '1p'`
+`sort {{path/to/file}}`
+`sort {{[-r|--reverse]}} {{path/to/file}}`
+`sort {{[-f|--ignore-case]}} {{path/to/file}}`
+`sort {{[-n|--numeric-sort]}} {{path/to/file}}`
+`sort {{[-t|--field-separator]}} : {{[-k|--key]}} 3n /etc/passwd`
+`sort {{[-t|--field-separator]}} : {{[-k|--key]}} 3,3n {{[-k|--key]}} 4,4g /etc/passwd`
+`sort {{[-u|--unique]}} {{path/to/file}}`
+`sort {{[-o|--output]}} {{path/to/output_file}} {{path/to/input_file}}`
+`ssh {{username}}@{{remote_host}}`
+`ssh -i {{path/to/key_file}} {{username}}@{{remote_host}}`
+`ssh {{username}}@10.0.0.1 -p {{2222}}`
+`ssh {{username}}@{{remote_host}} -t {{command}} {{command_arguments}}`
+`ssh -D {{1080}} {{username}}@{{remote_host}}`
+`ssh -L {{9999}}:{{example.org}}:{{80}} -N -T {{username}}@{{remote_host}}`
+`ssh -J {{username}}@{{jump_host}} {{username}}@{{remote_host}}`
+`<Enter><~><.>`
+`tail {{path/to/file}}`
+`tail {{path/to/file1 path/to/file2 ...}}`
+`tail {{[-5|--lines 5]}} {{path/to/file}}`
+`tail {{[-n|--lines]}} +{{count}} {{path/to/file}}`
+`tail {{[-c|--bytes]}} {{count}} {{path/to/file}}`
+`tail {{[-f|--follow]}} {{path/to/file}}`
+`tail {{[-F|--retry --follow]}} {{path/to/file}}`
+`tail {{[-n|--lines]}} {{count}} {{[-s|--sleep-interval]}} {{seconds}} {{[-f|--follow]}} {{path/to/file}}`
+`tar cf {{path/to/target.tar}} {{path/to/file1 path/to/file2 ...}}`
+`tar czf {{path/to/target.tar.gz}} {{path/to/file1 path/to/file2 ...}}`
+`tar czf {{path/to/target.tar.gz}} {{[-C|--directory]}} {{path/to/directory}} .`
+`tar xvf {{path/to/source.tar[.gz|.bz2|.xz]}}`
+`tar xf {{path/to/source.tar[.gz|.bz2|.xz]}} {{[-C|--directory]}} {{path/to/directory}}`
+`tar caf {{path/to/target.tar.xz}} {{path/to/file1 path/to/file2 ...}}`
+`tar tvf {{path/to/source.tar}}`
+`tar xf {{path/to/source.tar}} --wildcards "{{*.html}}"`
+`tmux`
+`tmux {{[new|new-session]}} -s {{name}}`
+`tmux {{[ls|list-sessions]}}`
+`tmux {{[a|attach]}}`
+`<Ctrl b><d>`
+`<Ctrl b><c>`
+`<Ctrl b><w>`
+`tmux kill-session -t {{name}}`
+`touch {{path/to/file1 path/to/file2 ...}}`
+`touch {{[-c|--no-create]}} {{-a|-m}} {{path/to/file1 path/to/file2 ...}}`
+`touch {{[-c|--no-create]}} -t {{YYYYMMDDHHMM.SS}} {{path/to/file1 path/to/file2 ...}}`
+`touch {{[-c|--no-create]}} {{[-r|--reference]}} {{path/to/reference_file}} {{path/to/file1 path/to/file2 ...}}`
+`touch {{[-d|--date]}} "{{last year|5 hours|next thursday|nov 14|...}}" {{path/to/file}}`
+`touch {{path/to/file{1..10}}}`
+`touch {{path/to/file{a..z}}}`
+`tr < {{path/to/file}} {{find_character}} {{replace_character}}`
+`echo {{text}} | tr {{find_character}} {{replace_character}}`
+`tr < {{path/to/file}} '{{abcd}}' '{{jkmn}}'`
+`tr < {{path/to/file}} {{[-d|--delete]}} '{{input_characters}}'`
+`tr < {{path/to/file}} {{[-s|--squeeze-repeats]}} '{{input_characters}}'`
+`tr < {{path/to/file}} "[:lower:]" "[:upper:]"`
+`tr < {{path/to/file}} {{[-cd|--complement --delete]}} "[:print:]"`
+`sort {{path/to/file}} | uniq`
+`sort {{path/to/file}} | uniq {{[-u|--unique]}}`
+`sort {{path/to/file}} | uniq {{[-d|--repeated]}}`
+`sort {{path/to/file}} | uniq {{[-c|--count]}}`
+`sort {{path/to/file}} | uniq {{[-c|--count]}} | sort {{[-nr|--numeric-sort --reverse]}}`
+`sort {{path/to/file}} | uniq {{[-w|--check-chars]}} 10`
+`sort {{path/to/file}} | uniq {{[-s|--skip-chars]}} 5`
+`wc {{[-l|--lines]}} {{path/to/file}}`
+`wc {{[-w|--words]}} {{path/to/file}}`
+`wc {{[-c|--bytes]}} {{path/to/file}}`
+`wc {{[-m|--chars]}} {{path/to/file}}`
+`{{find .}} | wc`
+`wc {{[-L|--max-line-length]}} {{path/to/file}}`
+`{{arguments_source}} | xargs {{command}}`
+`{{arguments_source}} | xargs sh -c "{{command1}} && {{command2}} | {{command3}}"`
+`{{arguments_source}} | xargs {{[-n|--max-args]}} 1 {{command}}`
+`{{arguments_source}} | xargs {{[-P|--max-procs]}} 10 {{[-n|--max-args]}} {{1}} {{command}}`
+`{{arguments_source}} | xargs -I _ {{command}} _ {{optional_extra_arguments}}`
+`{{arguments_source}} | xargs {{[-p|--interactive]}} {{command}}`
+`xargs {{[-a|--arg-file]}} {{path/to/file}} {{command}}`
+`{{arguments_source}} | xargs {{[-o|--open-tty]}} {{command}}`

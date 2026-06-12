@@ -190,3 +190,49 @@ func TestTranslateRoutesToAgent(t *testing.T) {
 		t.Errorf("agent route should have empty command, got %q", res.Command)
 	}
 }
+
+// TestTranslateProseRoutesToAgent: if the model emits a sentence of explanation
+// instead of a command (violating the contract), it must NOT land in the buffer
+// — it routes to the agent.
+func TestTranslateProseRoutesToAgent(t *testing.T) {
+	prose := `I can't translate that. The request "give me IP" is ambiguous—it could mean your local IP or a remote one.`
+	srv := fixtureServer(t, prose)
+	tr := New(llm.New("k", llm.WithBaseURL(srv.URL)), "")
+	res, err := tr.Translate(context.Background(), "give me ip", Context{}, nil)
+	if err != nil {
+		t.Fatalf("Translate: %v", err)
+	}
+	if res.Command != "" {
+		t.Errorf("prose must not become a command, got %q", res.Command)
+	}
+	if !res.Agent {
+		t.Errorf("prose should route to agent, got untranslatable=%v", res.Untranslatable)
+	}
+}
+
+func TestLooksLikeProse(t *testing.T) {
+	prose := []string{
+		`I can't translate that. The request is ambiguous.`,
+		`Sorry, could you clarify what you mean?`,
+		"这个请求无法翻译，请明确你的意图。",
+		`This needs several steps. First read the file, then edit it.`, // sentence boundary ". F"
+	}
+	notProse := []string{
+		"git status",
+		"find . -name '*.go'",
+		"lsof -i :8080",
+		`ifconfig | grep "inet "`,
+		"docker ps -a",
+		"ls -la /var/log", // has no sentence punctuation
+	}
+	for _, p := range prose {
+		if !looksLikeProse(p) {
+			t.Errorf("looksLikeProse(%q) = false, want true", p)
+		}
+	}
+	for _, c := range notProse {
+		if looksLikeProse(c) {
+			t.Errorf("looksLikeProse(%q) = true, want false (real command)", c)
+		}
+	}
+}

@@ -16,26 +16,27 @@ import (
 // (mode A) or, when the request needs multi-step hands-on work, route to the
 // agent (mode B) by emitting a single sentinel line. The constraints matter:
 // any prose, fences, or explanation would be written verbatim into the buffer.
-const systemPrompt = `You route a natural-language request for an interactive zsh session.
+const systemPrompt = `You route a natural-language request typed into an interactive zsh session. Output EXACTLY ONE of these three forms and ABSOLUTELY NOTHING ELSE — no explanation, no apology, no clarifying question, no prose:
 
-Decide between two outcomes and output ONLY one of them, nothing else:
+1. A SINGLE shell command — when the request maps to one command.
+   - Output only the command. No markdown, no code fences, no leading "$", no quotes around the whole thing, no comments.
+   - One logical line; pipes, &&, ; are fine.
 
-1. If the request can be accomplished with a SINGLE shell command, output ONLY that command.
-   - No explanation, no markdown, no code fences, no leading "$".
-   - One command line; pipes, &&, ; are fine but keep it one logical line.
-   - Do NOT wrap in quotes or add comments.
+2. The exact line  ## AGENT  — when the request needs MULTIPLE steps, exploration, reading/analyzing/editing files, or is a QUESTION that requires inspecting the project/files/system to answer (e.g. "what language is this project", "explain this code", "how do I undo the last commit in this repo"). The agent will read files and answer or do the work.
 
-2. If the request needs MULTIPLE steps, exploration, reading/editing files, or hands-on work that one command cannot do, output EXACTLY this single line and nothing else:
-   ## AGENT
+3. The exact line  # cannot translate  — ONLY for requests that are neither a command nor a task nor answerable by inspecting the machine (e.g. "what is the meaning of life").
+
+CRITICAL: You must NEVER write a sentence of explanation. If you are tempted to explain, clarify, or say something is ambiguous, output  ## AGENT  instead so the agent can handle it. Your entire output is fed directly into the user's shell input line, so anything other than the three forms above is a bug.
 
 Examples:
 - "list go files" -> find . -name '*.go'
 - "what's using port 8080" -> lsof -i :8080
+- "give me my ip" -> ifconfig | grep "inet "
+- "what language is this project" -> ## AGENT
+- "tell me about this project" -> ## AGENT
 - "fix all the failing tests" -> ## AGENT
 - "refactor this module to use channels" -> ## AGENT
-- "add error handling to main.go and run the build" -> ## AGENT
-
-If the request is a pure question that is neither a command nor a task (e.g. "what is SQL"), output exactly: # cannot translate
+- "what is the meaning of life" -> # cannot translate
 
 Use the provided current directory and recent history as context.`
 
@@ -104,6 +105,13 @@ func (t *Translator) Translate(ctx context.Context, nl string, tc Context, onDel
 	if cmd == AgentSentinel || strings.HasPrefix(cmd, AgentSentinel) {
 		return &Result{Agent: true}, nil
 	}
+	// Defense in depth: despite the system prompt, the model may emit a sentence
+	// of explanation or a clarifying question instead of a command. Never write
+	// prose into the user's input line — route it to the agent, which can ask or
+	// inspect as needed.
+	if looksLikeProse(cmd) {
+		return &Result{Agent: true}, nil
+	}
 	return &Result{Command: cmd, Effect: Classify(cmd)}, nil
 }
 
@@ -161,4 +169,64 @@ func sanitize(s string) string {
 		return strings.TrimSpace(line)
 	}
 	return ""
+}
+
+// looksLikeProse reports whether a candidate "command" is actually a sentence of
+// natural language (an explanation, apology, or clarifying question) that the
+// model emitted in violation of the routing contract. Such text must never be
+// written into the user's input line. Heuristics, tuned to avoid flagging real
+// commands (which are short, rarely end in '.'/'?'/'!', and don't read as
+// sentences):
+//   - contains a well-known apology/clarification phrase;
+//   - is long AND ends with sentence punctuation;
+//   - contains multiple sentences (". " / "? " / "! " followed by a letter).
+func looksLikeProse(s string) bool {
+	lc := strings.ToLower(s)
+	for _, p := range proseMarkers {
+		if strings.Contains(lc, p) {
+			return true
+		}
+	}
+	// Multiple sentences: a sentence terminator followed by a space and an
+	// UPPERCASE letter (a sentence boundary). Commands like `find . -name` have
+	// ". " but never ". X" with a capital, so this avoids false positives.
+	if hasSentenceBoundary(s) {
+		return true
+	}
+	// A long line that ends like a sentence is prose, not a command.
+	if len(s) > 80 {
+		switch s[len(s)-1] {
+		case '.', '?', '!':
+			return true
+		}
+	}
+	return false
+}
+
+// hasSentenceBoundary reports whether s contains a ". "/"? "/"! " followed by an
+// uppercase letter, or a CJK sentence terminator — a strong sign of prose.
+func hasSentenceBoundary(s string) bool {
+	rs := []rune(s)
+	for i := 0; i+2 < len(rs); i++ {
+		if (rs[i] == '.' || rs[i] == '?' || rs[i] == '!') && rs[i+1] == ' ' {
+			n := rs[i+2]
+			if n >= 'A' && n <= 'Z' {
+				return true
+			}
+		}
+	}
+	for _, sep := range []string{"。", "？", "！"} {
+		if strings.Contains(s, sep) {
+			return true
+		}
+	}
+	return false
+}
+
+// proseMarkers are phrases that only appear when the model is explaining or
+// asking rather than emitting a command.
+var proseMarkers = []string{
+	"i can't", "i cannot", "i'm not", "i am not", "sorry", "could mean",
+	"ambiguous", "please clarify", "do you mean", "i'd need", "i would need",
+	"it could", "not sure", "unclear", "无法", "请明确", "你是指", "不清楚", "不确定",
 }

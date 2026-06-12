@@ -66,14 +66,18 @@ func main() {
 		}
 		client := llm.New(cfg.APIKey, opts...)
 
-		fastModel := cfg.FastModel
-		if fastModel == "" {
-			fastModel = cfg.Model
+		// The translator now ROUTES (command vs agent vs question) in addition to
+		// translating, so it needs the capable model — a fast model can't reliably
+		// judge A/B and tends to emit prose instead of a command. Prefer the
+		// configured capable model, then the fast model, then discovery.
+		routeModel := cfg.Model
+		if routeModel == "" {
+			routeModel = cfg.FastModel
 		}
-		if fastModel == "" {
+		if routeModel == "" {
 			// No model configured: discover one from the provider so the same
 			// build works against any compatible endpoint (GLM/DeepSeek/gateway).
-			m, err := pickFastModel(client)
+			m, err := pickModel(client)
 			if err != nil {
 				// Loud, source-aware diagnostic. A 401 here almost always means a
 				// stale/foreign credential is shadowing the right one — name the
@@ -86,14 +90,14 @@ func main() {
 						"or set ANTHROPIC_MODEL to skip discovery.", cfg.Source)
 				}
 			} else {
-				fastModel = m
-				log.Printf("flowd: auto-selected model %q from %s/v1/models", fastModel, cfg.BaseURL)
+				routeModel = m
+				log.Printf("flowd: auto-selected model %q from %s/v1/models", routeModel, cfg.BaseURL)
 			}
 		}
-		if fastModel != "" {
-			srv.SetTranslator(translate.New(client, fastModel))
+		if routeModel != "" {
+			srv.SetTranslator(translate.New(client, routeModel))
 			log.Printf("flowd: NL translation enabled — endpoint=%s auth=%s model=%q",
-				cfg.BaseURL, cfg.Source, fastModel)
+				cfg.BaseURL, cfg.Source, routeModel)
 		}
 	} else {
 		log.Printf("flowd: no LLM credential (ANTHROPIC_AUTH_TOKEN/API_KEY) — NL translation disabled, NL verdicts will accept")
@@ -127,11 +131,11 @@ func isAuthError(err error) bool {
 	return false
 }
 
-// pickFastModel discovers a model from the provider when none is configured. It
-// prefers names that signal a small/fast model (the right tier for one-line
-// command translation), and otherwise returns the first listed model. Works
-// across Anthropic-compatible providers (haiku, mini, flash, small, lite…).
-func pickFastModel(client *llm.Client) (string, error) {
+// pickModel discovers a model from the provider when none is configured. Since
+// the translator now also routes (command vs agent vs question), it prefers a
+// capable tier (opus/sonnet) for reliable judgment, falling back to any model.
+// Works across Anthropic-compatible providers.
+func pickModel(client *llm.Client) (string, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	models, err := client.ListModels(ctx)
@@ -141,8 +145,8 @@ func pickFastModel(client *llm.Client) (string, error) {
 	if len(models) == 0 {
 		return "", fmt.Errorf("provider returned no models")
 	}
-	// Preference order of substrings signaling a fast/small tier.
-	prefer := []string{"haiku", "mini", "flash", "small", "lite", "fast", "air"}
+	// Preference order: capable tiers first (routing needs judgment), then any.
+	prefer := []string{"opus", "sonnet", "gpt-5", "gpt-4", "pro", "haiku", "mini", "flash"}
 	for _, p := range prefer {
 		for _, m := range models {
 			if strings.Contains(strings.ToLower(m.ID), p) {

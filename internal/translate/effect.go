@@ -84,12 +84,17 @@ func Classify(cmd string) Effect {
 		}
 		switch n := node.(type) {
 		case *syntax.Redirect:
-			// Output redirections (>, >>, etc.) write files. Input (<) is fine,
-			// but distinguishing is fiddly; any redirect -> caution except a
-			// pure here-string/input. Be conservative: treat > and >> as unsafe.
+			// Output redirections (>, >>, etc.) generally write files. But two
+			// common forms are harmless and appear in read-only queries:
+			//   - redirecting a non-stdout fd (e.g. `2>…` stderr)
+			//   - redirecting to /dev/null (an explicit discard)
+			// Treat those as safe; any other output redirection is a side effect.
 			if n.Op == syntax.RdrOut || n.Op == syntax.AppOut ||
 				n.Op == syntax.RdrAll || n.Op == syntax.AppAll ||
 				n.Op == syntax.ClbOut {
+				if redirectIsHarmless(n) {
+					return true // keep walking; this redirect is fine
+				}
 				safe = false
 				return false
 			}
@@ -106,6 +111,20 @@ func Classify(cmd string) Effect {
 		return EffectReadOnly
 	}
 	return EffectSideEffect
+}
+
+// redirectIsHarmless reports whether an output redirect does not write a user
+// file: a redirect of a non-stdout fd (e.g. stderr `2>`), or any redirect whose
+// target is /dev/null.
+func redirectIsHarmless(n *syntax.Redirect) bool {
+	// fd prefix: nil means stdout (fd 1). A non-"1" fd (e.g. "2") is harmless.
+	if n.N != nil && n.N.Value != "" && n.N.Value != "1" {
+		return true
+	}
+	if t := litWord(n.Word); t == "/dev/null" {
+		return true
+	}
+	return false
 }
 
 // callIsReadOnly checks a single simple command (first word + args).

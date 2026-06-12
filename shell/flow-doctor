@@ -1,0 +1,97 @@
+#!/usr/bin/env zsh
+# flow-doctor — diagnose flow's LLM provider credentials WITHOUT leaking secrets.
+#
+# It shows, for each source (process env and ~/.claude/settings.json), a safe
+# fingerprint of the credentials (length + first 6 + last 4 chars only), then
+# probes the configured endpoint's /v1/models with each credential and reports
+# the HTTP status. Use this when flowd logs "NL translation DISABLED … 401".
+#
+# Nothing here is destructive and no full secret is ever printed.
+#
+# Usage:  ./shell/flow-doctor
+
+emulate -L zsh
+setopt no_unset
+
+# fingerprint <value> -> "len=N first=xxxxxx last=yyyy" (or "<empty>")
+fingerprint() {
+  local v=$1
+  if [[ -z $v ]]; then print -r -- "<empty>"; return; fi
+  local n=${#v}
+  if (( n <= 12 )); then
+    print -r -- "len=$n (too short to fingerprint safely)"
+  else
+    print -r -- "len=$n first=${v[1,6]} last=${v[-4,-1]}"
+  fi
+}
+
+# read a key from ~/.claude/settings.json env block
+settings_get() {
+  local key=$1
+  python3 - "$key" <<'PY' 2>/dev/null
+import json,os,sys
+p=os.path.expanduser("~/.claude/settings.json")
+try:
+    d=json.load(open(p)).get("env",{})
+except Exception:
+    sys.exit(0)
+print(d.get(sys.argv[1],""))
+PY
+}
+
+print -r -- "=== flow-doctor: credential sources (fingerprints only, no secrets) ==="
+print -r -- ""
+
+# Resolve each value the way flowd does: env first, then settings.json.
+local env_base=${ANTHROPIC_BASE_URL:-}
+local env_tok=${ANTHROPIC_AUTH_TOKEN:-}
+local env_key=${ANTHROPIC_API_KEY:-}
+local set_base=$(settings_get ANTHROPIC_BASE_URL)
+local set_tok=$(settings_get ANTHROPIC_AUTH_TOKEN)
+local set_key=$(settings_get ANTHROPIC_API_KEY)
+
+print -r -- "process env:"
+print -r -- "  ANTHROPIC_BASE_URL    = ${env_base:-<empty>}"
+print -r -- "  ANTHROPIC_AUTH_TOKEN  = $(fingerprint "$env_tok")"
+print -r -- "  ANTHROPIC_API_KEY     = $(fingerprint "$env_key")"
+print -r -- ""
+print -r -- "~/.claude/settings.json env:"
+print -r -- "  ANTHROPIC_BASE_URL    = ${set_base:-<empty>}"
+print -r -- "  ANTHROPIC_AUTH_TOKEN  = $(fingerprint "$set_tok")"
+print -r -- "  ANTHROPIC_API_KEY     = $(fingerprint "$set_key")"
+print -r -- ""
+
+# Do env and settings tokens match?
+if [[ -n $env_tok || -n $set_tok ]]; then
+  if [[ $env_tok == $set_tok ]]; then
+    print -r -- "AUTH_TOKEN env vs settings: SAME"
+  else
+    print -r -- "AUTH_TOKEN env vs settings: DIFFERENT  <-- likely the problem"
+  fi
+fi
+print -r -- ""
+
+# Effective base URL (env wins, else settings, else default).
+local base=${env_base:-${set_base:-https://api.anthropic.com}}
+base=${base%/}
+print -r -- "=== probing $base/v1/models with each available credential ==="
+
+probe() {
+  local label=$1 header=$2 value=$3
+  [[ -z $value ]] && { print -r -- "  [$label] (not set, skipped)"; return; }
+  local code
+  code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 15 "$base/v1/models" \
+    -H "anthropic-version: 2023-06-01" -H "$header: $value" 2>/dev/null)
+  print -r -- "  [$label] HTTP $code"
+}
+
+probe "env  AUTH_TOKEN (Bearer)" "authorization" "${env_tok:+Bearer $env_tok}"
+probe "env  API_KEY    (x-api-key)" "x-api-key" "$env_key"
+probe "set  AUTH_TOKEN (Bearer)" "authorization" "${set_tok:+Bearer $set_tok}"
+probe "set  API_KEY    (x-api-key)" "x-api-key" "$set_key"
+
+print -r -- ""
+print -r -- "Reading: the credential flowd uses is env first, then settings.json."
+print -r -- "Whichever line above shows HTTP 200 is a working credential; 401 is bad."
+print -r -- "If env AUTH_TOKEN is 401 but settings AUTH_TOKEN is 200, your shell has a"
+print -r -- "stale ANTHROPIC_AUTH_TOKEN exported — unset it (or fix it in ~/.zshrc)."

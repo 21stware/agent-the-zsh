@@ -25,6 +25,8 @@
 : ${FLOW_TRANSLATE_TIMEOUT:=12}   # phase-2 read: how long to wait for NL translation
 : ${FLOW_HISTORY_LINES:=10} # recent history lines sent as context
 : ${FLOW_PROTO:=1}
+: ${FLOW_DEBUG:=0}          # 1 = append per-interaction trace to $FLOW_DEBUG_LOG
+: ${FLOW_DEBUG_LOG:="${TMPDIR:-/tmp}/flow-widget.log"}
 : ${FLOW_MARK_READONLY:="✓ flow"}        # POSTDISPLAY tag for a read-only translation
 : ${FLOW_MARK_SIDEEFFECT:="⚠ flow: side-effect — review before Enter"}
 : ${FLOW_MARK_PENDING:="⋯ flow: translating…"}
@@ -32,6 +34,13 @@
 zmodload zsh/net/socket 2>/dev/null || return 0  # no socket module -> stay plain
 zmodload zsh/system 2>/dev/null || return 0
 zmodload zsh/datetime 2>/dev/null || return 0    # for EPOCHREALTIME read deadline
+
+# _flow_dbg appends a timestamped line to the debug log when FLOW_DEBUG=1. Used
+# to trace a UAT session without guessing — set FLOW_DEBUG=1 before sourcing.
+_flow_dbg() {
+  [[ $FLOW_DEBUG == 1 ]] || return 0
+  print -r -- "$(strftime '%H:%M:%S' $EPOCHSECONDS) $*" >> "$FLOW_DEBUG_LOG" 2>/dev/null
+}
 
 # _flow_socket_path resolves the socket path, matching daemon.SocketPath():
 # FLOW_SOCKET wins; else XDG_RUNTIME_DIR/flow; else TMPDIR/flow-<uid>/flow.
@@ -184,10 +193,12 @@ flow-accept-line() {
 
   # Clear any lingering translation marker before deciding this line.
   _flow_clear_mark
+  _flow_dbg "accept-line: buffer=[$BUFFER]"
 
   # Open the connection and send the request.
   if ! _flow_open; then
     # Daemon unavailable: run the line as-is (degrade, never brick).
+    _flow_dbg "  open FAILED -> degrade to accept-line (daemon down?)"
     zle .accept-line
     return
   fi
@@ -197,12 +208,14 @@ flow-accept-line() {
   # microseconds; NL comes back as "pending" almost as fast.
   local reply
   if ! reply=$(_flow_read_line "$FLOW_TIMEOUT"); then
+    _flow_dbg "  phase1 TIMEOUT/err (>${FLOW_TIMEOUT}s) -> degrade to accept-line"
     _flow_close
     zle .accept-line
     return
   fi
 
   local action=$(_flow_json_field "$reply" action)
+  _flow_dbg "  phase1 reply: $reply"
 
   if [[ $action == pending ]]; then
     # NL is being translated. Show progress, then wait (longer) for phase 2.
@@ -211,6 +224,7 @@ flow-accept-line() {
     zle -R   # force a redraw so the user sees "translating…" while we wait
     if ! reply=$(_flow_read_line "$FLOW_TRANSLATE_TIMEOUT"); then
       # Translation timed out: drop the marker and accept the original line.
+      _flow_dbg "  phase2 TIMEOUT/err (>${FLOW_TRANSLATE_TIMEOUT}s) -> accept original"
       _flow_close
       _flow_clear_mark
       zle .reset-prompt 2>/dev/null
@@ -218,6 +232,7 @@ flow-accept-line() {
       return
     fi
     action=$(_flow_json_field "$reply" action)
+    _flow_dbg "  phase2 reply: $reply"
   fi
 
   _flow_close

@@ -72,6 +72,13 @@ print -r -- "  • Enter runs the translated command; Esc Esc restores your orig
 print -r -- "  • 'exit' or Ctrl-D to quit"
 print -r -- ""
 
+# Enable widget debug tracing for the UAT session so we can diagnose without
+# guessing. The trace goes to a per-session file printed below.
+dbglog="$tmp/flow-uat-widget-$$.log"
+print -r -- "flow-uat: widget debug trace -> $dbglog"
+print -r -- "flow-uat: daemon log         -> $logfile"
+print -r -- ""
+
 # Launch an interactive zsh with a minimal rcfile that loads the widget and
 # points it at our socket. Isolated history so UAT input doesn't pollute yours.
 zdotdir="$tmp/flow-uat-zdot-$$"
@@ -81,6 +88,8 @@ cat > "$zdotdir/.zshrc" <<RC
 [[ -f ~/.zshrc ]] && source ~/.zshrc
 export FLOW_SOCKET="$sock"
 export HISTFILE="$zdotdir/.history"
+export FLOW_DEBUG=1
+export FLOW_DEBUG_LOG="$dbglog"
 PROMPT='%F{cyan}flow-uat%f %~ %# '
 source "$repo/shell/flow.zsh"
 print -r -- "flow widget loaded (FLOW_SOCKET=\$FLOW_SOCKET)"
@@ -88,3 +97,5 @@ RC
 
 ZDOTDIR="$zdotdir" zsh -i || true
 rm -rf "$zdotdir"
+print -r -- ""
+print -r -- "flow-uat: widget trace was at $dbglog"

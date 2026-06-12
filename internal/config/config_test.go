@@ -79,3 +79,66 @@ func TestLoadAPIKeyAuth(t *testing.T) {
 		t.Error("Enabled() = false with API key, want true")
 	}
 }
+
+// TestStrayEnvAPIKeyDoesNotShadowProxyToken is the regression guard for the UAT
+// bug: settings.json configures a proxy (BASE_URL + AUTH_TOKEN), but the shell
+// has a leftover ANTHROPIC_API_KEY from another tool. That key doesn't belong to
+// the proxy and caused a 401. The proxy's Bearer token (same source as the base
+// URL) must win, and the stray key must be dropped.
+func TestStrayEnvAPIKeyDoesNotShadowProxyToken(t *testing.T) {
+	dir := t.TempDir()
+	claudeDir := filepath.Join(dir, ".claude")
+	if err := os.MkdirAll(claudeDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	settings := `{"env":{
+		"ANTHROPIC_BASE_URL":"https://proxy.example",
+		"ANTHROPIC_AUTH_TOKEN":"sk-proxy-token"
+	}}`
+	if err := os.WriteFile(filepath.Join(claudeDir, "settings.json"), []byte(settings), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("HOME", dir)
+	os.Unsetenv("ANTHROPIC_BASE_URL")
+	os.Unsetenv("ANTHROPIC_AUTH_TOKEN")
+	os.Unsetenv("ANTHROPIC_MODEL")
+	os.Unsetenv("ANTHROPIC_SMALL_FAST_MODEL")
+	// The trap: a stray key in the env from some other tool.
+	t.Setenv("ANTHROPIC_API_KEY", "sk-stray-foreign-key")
+
+	c := Load()
+	if c.BaseURL != "https://proxy.example" {
+		t.Errorf("BaseURL = %q, want proxy from settings", c.BaseURL)
+	}
+	if c.AuthToken != "sk-proxy-token" {
+		t.Errorf("AuthToken = %q, want the proxy's Bearer token", c.AuthToken)
+	}
+	if c.APIKey != "" {
+		t.Errorf("APIKey = %q, want it dropped (stray, doesn't match proxy)", c.APIKey)
+	}
+}
+
+// TestEnvKeyMatchingEnvBaseURLWins: when both base URL and API key come from the
+// env (a coherent first-party/proxy setup) and a token lingers in settings.json,
+// the env key should win because it matches the endpoint's source.
+func TestEnvKeyMatchingEnvBaseURLWins(t *testing.T) {
+	dir := t.TempDir()
+	claudeDir := filepath.Join(dir, ".claude")
+	os.MkdirAll(claudeDir, 0o700)
+	os.WriteFile(filepath.Join(claudeDir, "settings.json"),
+		[]byte(`{"env":{"ANTHROPIC_AUTH_TOKEN":"sk-old-settings-token"}}`), 0o600)
+	t.Setenv("HOME", dir)
+	os.Unsetenv("ANTHROPIC_AUTH_TOKEN")
+	os.Unsetenv("ANTHROPIC_MODEL")
+	os.Unsetenv("ANTHROPIC_SMALL_FAST_MODEL")
+	t.Setenv("ANTHROPIC_BASE_URL", "https://api.anthropic.com")
+	t.Setenv("ANTHROPIC_API_KEY", "sk-env-key")
+
+	c := Load()
+	if c.APIKey != "sk-env-key" {
+		t.Errorf("APIKey = %q, want env key (matches env base URL)", c.APIKey)
+	}
+	if c.AuthToken != "" {
+		t.Errorf("AuthToken = %q, want dropped", c.AuthToken)
+	}
+}

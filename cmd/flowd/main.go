@@ -12,6 +12,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"log"
@@ -72,16 +73,24 @@ func main() {
 		if fastModel == "" {
 			// No model configured: discover one from the provider so the same
 			// build works against any compatible endpoint (GLM/DeepSeek/gateway).
-			if m, err := pickFastModel(client); err != nil {
-				log.Printf("flowd: model auto-discovery failed (%v); set ANTHROPIC_SMALL_FAST_MODEL or ANTHROPIC_MODEL", err)
+			m, err := pickFastModel(client)
+			if err != nil {
+				// Loud, source-aware diagnostic. A 401 here almost always means a
+				// stale/foreign credential is shadowing the right one — name the
+				// source so the user knows which env var / file to fix.
+				log.Printf("flowd: NL translation DISABLED — could not reach %s using %s: %v",
+					cfg.BaseURL, cfg.Source, err)
+				if isAuthError(err) {
+					log.Printf("flowd: this looks like an auth failure. flow is using %s. "+
+						"If that credential is wrong, unset the stray env var (e.g. ANTHROPIC_API_KEY) "+
+						"or set ANTHROPIC_MODEL to skip discovery.", cfg.Source)
+				}
 			} else {
 				fastModel = m
 				log.Printf("flowd: auto-selected model %q from %s/v1/models", fastModel, cfg.BaseURL)
 			}
 		}
-		if fastModel == "" {
-			log.Printf("flowd: no usable model — NL translation disabled")
-		} else {
+		if fastModel != "" {
 			srv.SetTranslator(translate.New(client, fastModel))
 			log.Printf("flowd: NL translation enabled — endpoint=%s auth=%s model=%q",
 				cfg.BaseURL, cfg.Source, fastModel)
@@ -106,6 +115,16 @@ func main() {
 		}
 		log.Printf("flowd: serve stopped: %v", err)
 	}
+}
+
+// isAuthError reports whether err is an HTTP 401/403 from the provider — the
+// signature of a wrong or foreign credential.
+func isAuthError(err error) bool {
+	var apiErr *llm.APIError
+	if errors.As(err, &apiErr) {
+		return apiErr.Status == 401 || apiErr.Status == 403
+	}
+	return false
 }
 
 // pickFastModel discovers a model from the provider when none is configured. It

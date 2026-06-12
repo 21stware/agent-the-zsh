@@ -67,15 +67,39 @@ func Load() *Config {
 	}
 
 	c := &Config{}
-	c.BaseURL, _ = get(envBaseURL)
+	var baseSrc string
+	c.BaseURL, baseSrc = get(envBaseURL)
 	if c.BaseURL == "" {
 		c.BaseURL = DefaultBaseURL
+		baseSrc = "default"
 	}
+
 	var tokSrc, keySrc string
 	c.AuthToken, tokSrc = get(envAuthToken)
 	c.APIKey, keySrc = get(envAPIKey)
 	c.Model, _ = get(envModel)
 	c.FastModel, _ = get(envFastModel)
+
+	// Auth precedence. AUTH_TOKEN (Bearer) and API_KEY (x-api-key) are mutually
+	// exclusive at the wire level, so when both resolve we must pick one. The
+	// trap we're avoiding: a custom endpoint (proxy) configured in
+	// settings.json, plus a stray ANTHROPIC_API_KEY left in the shell env from
+	// some other tool. That key does not belong to the proxy and yields 401.
+	//
+	// Rule: if both are present, prefer the credential that comes from the SAME
+	// source as the (non-default) base URL — they belong together. Otherwise
+	// prefer AUTH_TOKEN (the proxy/Bearer convention). We null out the loser so
+	// the client sends exactly one auth header.
+	if c.AuthToken != "" && c.APIKey != "" {
+		switch {
+		case baseSrc != "default" && keySrc == baseSrc && tokSrc != baseSrc:
+			c.AuthToken = "" // key matches the endpoint's source; drop the stray token
+		case baseSrc != "default" && tokSrc == baseSrc && keySrc != baseSrc:
+			c.APIKey = "" // token matches the endpoint's source; drop the stray key
+		default:
+			c.APIKey = "" // tie / no signal: Bearer wins
+		}
+	}
 
 	switch {
 	case c.AuthToken != "":

@@ -25,11 +25,17 @@
 : ${FLOW_TRANSLATE_TIMEOUT:=12}   # phase-2 read: how long to wait for NL translation
 : ${FLOW_HISTORY_LINES:=10} # recent history lines sent as context
 : ${FLOW_PROTO:=1}
+: ${FLOW_REVIEW:=focused}   # strict | focused | yolo — how much to confirm before running
 : ${FLOW_DEBUG:=0}          # 1 = append per-interaction trace to $FLOW_DEBUG_LOG
 : ${FLOW_DEBUG_LOG:="${TMPDIR:-/tmp}/flow-widget.log"}
 : ${FLOW_MARK_READONLY:="✓ flow"}        # POSTDISPLAY tag for a read-only translation
 : ${FLOW_MARK_SIDEEFFECT:="⚠ flow: side-effect — review before Enter"}
 : ${FLOW_MARK_PENDING:="…"}
+
+# Spinner frames and rotating status words shown while the daemon works. Purely
+# cosmetic — the words rotate to suggest what flow is doing.
+FLOW_SPIN_FRAMES=("⠋" "⠙" "⠹" "⠸" "⠼" "⠴" "⠦" "⠧" "⠇" "⠏")
+FLOW_SPIN_WORDS=("routing" "thinking" "clarifying" "scaffolding" "bypassing")
 
 zmodload zsh/net/socket 2>/dev/null || return 0  # no socket module -> stay plain
 zmodload zsh/system 2>/dev/null || return 0
@@ -146,7 +152,44 @@ _flow_read_line() {
   print -r -- "$reply"
 }
 
-# _flow_json_field extracts a top-level string/scalar field from a flat JSON
+# _flow_read_line_animated reads a reply like _flow_read_line, but while waiting
+# it animates an in-line spinner + rotating status word via POSTDISPLAY. zsh is
+# single-threaded inside a widget, so instead of one long blocking read we poll
+# in short slices: each slice does a brief sysread; on a timeout slice we advance
+# one animation frame and redraw with `zle -R`. Net effect is a live animation
+# without any background process.
+_flow_read_line_animated() {
+  local budget=$1
+  local reply="" chunk
+  local deadline=$(( EPOCHREALTIME + budget ))
+  local frame=0 word=0 slice=0
+  while true; do
+    local remain=$(( deadline - EPOCHREALTIME ))
+    (( remain <= 0 )) && break
+    # Cap each read slice so the animation advances ~8x/sec.
+    local step=0.12
+    (( remain < step )) && step=$remain
+    chunk=""
+    if sysread -t $step -i $FLOW_FD chunk 2>/dev/null; then
+      reply+=$chunk
+      [[ $reply == *$'\n'* ]] && break
+      continue
+    fi
+    # Timeout slice (no data yet): advance the animation.
+    local f=${FLOW_SPIN_FRAMES[$(( frame % ${#FLOW_SPIN_FRAMES[@]} + 1 ))]}
+    # rotate the status word roughly every ~1s (8 frames)
+    (( slice++ ))
+    (( slice % 8 == 0 )) && (( word++ ))
+    local w=${FLOW_SPIN_WORDS[$(( word % ${#FLOW_SPIN_WORDS[@]} + 1 ))]}
+    POSTDISPLAY=$'\n'"$f $w…"
+    typeset -g FLOW_MARK_ACTIVE=1
+    zle -R 2>/dev/null
+    (( frame++ ))
+  done
+  reply=${reply%%$'\n'*}
+  [[ -z $reply ]] && return 1
+  print -r -- "$reply"
+}
 # object. Good enough for our small, daemon-produced replies (no nesting). For
 # string fields it returns the unescaped-ish value; for our purposes the values
 # (accept/replace/CMD/NL) contain no escapes.
@@ -243,11 +286,9 @@ flow-accept-line() {
   _flow_dbg "  phase1 reply: $reply"
 
   if [[ $action == pending ]]; then
-    # NL is being translated. Show progress, then wait (longer) for phase 2.
-    POSTDISPLAY=$'\n'"$FLOW_MARK_PENDING"
-    typeset -g FLOW_MARK_ACTIVE=1
-    zle -R   # force a redraw so the user sees "translating…" while we wait
-    if ! reply=$(_flow_read_line "$FLOW_TRANSLATE_TIMEOUT"); then
+    # NL is being translated. Animate a spinner + rotating word while we wait
+    # (longer) for phase 2.
+    if ! reply=$(_flow_read_line_animated "$FLOW_TRANSLATE_TIMEOUT"); then
       # Translation timed out: drop the marker and accept the original line.
       _flow_dbg "  phase2 TIMEOUT/err (>${FLOW_TRANSLATE_TIMEOUT}s) -> accept original"
       _flow_close
@@ -270,47 +311,62 @@ _flow_apply_reply() {
   local action=$1 reply=$2
   case $action in
     agent)
-      # Route to mode B. flow-agent takes over the foreground terminal (full
-      # TTY, real cwd, can prompt). To avoid echoing a long `flow-agent '<task>'`
-      # line, pass the task via an exported env var and run a bare invocation;
-      # the visible command is just the launcher name. The original NL is saved
-      # for Esc Esc.
+      # Route to mode B. Run flow-agent cleanly via a precmd hook instead of
+      # stuffing a command into the buffer: this avoids echoing the launcher
+      # path and the confusing "line gets replaced then executed" effect. We
+      # clear the input line, accept it (empty), and a one-shot precmd runs the
+      # agent in the foreground before the next prompt is drawn.
       local task=$(_flow_json_unescape "$(_flow_json_string "$reply" text)")
       [[ -z $task ]] && task=$BUFFER
       typeset -g FLOW_LAST_ORIGINAL=$BUFFER
+      typeset -g FLOW_PENDING_AGENT_TASK=$task
       _flow_clear_mark
-      export FLOW_TASK=$task
-      # Bare launcher invocation; reads FLOW_TASK. -q keeps it quiet about argv.
-      BUFFER="${FLOW_AGENT_CMD:-flow-agent}"
-      CURSOR=${#BUFFER}
+      BUFFER=""
       zle .reset-prompt 2>/dev/null
       zle .accept-line
       ;;
     replace)
-      # NL translated to a command. Replace buffer, keep cursor at end, do NOT
-      # accept — the user reviews and presses Enter again (constraint 3).
       local text=$(_flow_json_string "$reply" text)
-      if [[ -n $text ]]; then
-        # Save the ORIGINAL input BEFORE overwriting, for Esc Esc undo.
-        typeset -g FLOW_LAST_ORIGINAL=$BUFFER
-        typeset -g FLOW_LAST_EFFECT=$(_flow_json_field "$reply" effect)
-        BUFFER=$(_flow_json_unescape "$text")
-        CURSOR=${#BUFFER}
-        typeset -g FLOW_LAST_TRANSLATED=$BUFFER
-        # Mark the line with the effect (visual only — Enter still runs it).
-        if [[ $FLOW_LAST_EFFECT == side-effect ]]; then
-          POSTDISPLAY=$'\n'"$FLOW_MARK_SIDEEFFECT"
-        else
-          POSTDISPLAY=$'\n'"$FLOW_MARK_READONLY"
-        fi
-        typeset -g FLOW_MARK_ACTIVE=1
+      if [[ -z $text ]]; then
+        _flow_clear_mark
         zle .reset-prompt 2>/dev/null
+        zle .accept-line
         return
       fi
-      # No text despite replace: degrade.
+      local effect=$(_flow_json_field "$reply" effect)
+      local cmd=$(_flow_json_unescape "$text")
+      typeset -g FLOW_LAST_ORIGINAL=$BUFFER
+      typeset -g FLOW_LAST_EFFECT=$effect
+
+      # Three-tier review for translated commands (mirrors the agent's gate):
+      #   yolo    -> run immediately, no confirmation
+      #   focused -> run read-only immediately; side-effects wait for Enter
+      #   strict  -> everything waits for Enter
+      local run_now=0
+      case $FLOW_REVIEW in
+        yolo) run_now=1 ;;
+        strict) run_now=0 ;;
+        *) [[ $effect == read-only ]] && run_now=1 ;;   # focused (default)
+      esac
+
       _flow_clear_mark
+      BUFFER=$cmd
+      CURSOR=${#BUFFER}
+      if (( run_now )); then
+        # Auto-run: no second confirmation under this review level.
+        zle .reset-prompt 2>/dev/null
+        zle .accept-line
+        return
+      fi
+      # Wait for the user to review and press Enter. Tag with the effect.
+      typeset -g FLOW_LAST_TRANSLATED=$BUFFER
+      if [[ $effect == side-effect ]]; then
+        POSTDISPLAY=$'\n'"$FLOW_MARK_SIDEEFFECT"
+      else
+        POSTDISPLAY=$'\n'"$FLOW_MARK_READONLY"
+      fi
+      typeset -g FLOW_MARK_ACTIVE=1
       zle .reset-prompt 2>/dev/null
-      zle .accept-line
       ;;
     accept|*)
       # CMD verdict, untranslatable NL, or anything unexpected: run as-is. Clear
@@ -320,6 +376,16 @@ _flow_apply_reply() {
       zle .accept-line
       ;;
   esac
+}
+
+# _flow_run_pending_agent is a precmd hook: if a mode-B task was queued, run
+# flow-agent in the foreground (clean TTY, no echoed command), then clear the
+# flag so it runs exactly once.
+_flow_run_pending_agent() {
+  [[ -z $FLOW_PENDING_AGENT_TASK ]] && return
+  local task=$FLOW_PENDING_AGENT_TASK
+  unset FLOW_PENDING_AGENT_TASK
+  FLOW_TASK=$task "${FLOW_AGENT_CMD:-flow-agent}"
 }
 
 # _flow_clear_mark removes the POSTDISPLAY tag and translation bookkeeping once
@@ -358,3 +424,6 @@ zle -N zle-line-pre-redraw _flow_line_pre_redraw
 bindkey '^M' flow-accept-line   # Enter / Return
 bindkey '^J' flow-accept-line   # Ctrl-J / line feed
 bindkey '\e\e' flow-undo        # Esc Esc — restore original NL input
+
+# Run a queued mode-B task before each prompt (clean foreground, no echoed cmd).
+autoload -Uz add-zsh-hook 2>/dev/null && add-zsh-hook precmd _flow_run_pending_agent

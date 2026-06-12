@@ -32,6 +32,7 @@ func newRunner(level agent.ReviewLevel) *runner {
 }
 
 var spinnerFrames = []string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"}
+var spinnerWords = []string{"thinking", "routing", "scaffolding", "working", "reasoning"}
 
 // startSpinner begins the waiting animation on its own line. It is a no-op if
 // already running or if NO_COLOR/non-tty (we still animate; it's cheap).
@@ -56,9 +57,10 @@ func (r *runner) startSpinner() {
 			case <-t.C:
 				r.mu.Lock()
 				f := spinnerFrames[r.frame%len(spinnerFrames)]
+				w := spinnerWords[(r.frame/12)%len(spinnerWords)] // rotate ~1.1s
 				r.frame++
-				// \r returns to line start; spaces clear leftovers.
-				fmt.Printf("\r%s%s thinking…%s   ", cCyan, f, cReset)
+				// \r returns to line start; trailing spaces clear leftovers.
+				fmt.Printf("\r%s%s %s…%s   ", cCyan, f, w, cReset)
 				r.mu.Unlock()
 			}
 		}

@@ -81,7 +81,12 @@ func (s *Server) Serve(ln net.Listener) error {
 	}
 }
 
-// handle processes a single connection: read one request, decide, reply.
+// handle processes a single connection. The reply is two-phase so the command
+// path stays bounded by the widget's short first-phase timeout while NL
+// translation may take seconds:
+//   - CMD (or NL with no translator): one line — accept — sent immediately.
+//   - NL with a translator: a "pending" line immediately, then a second line
+//     (replace/accept) once translation completes.
 func (s *Server) handle(conn net.Conn) {
 	defer conn.Close()
 	r := bufio.NewReader(conn)
@@ -96,16 +101,6 @@ func (s *Server) handle(conn net.Conn) {
 		return
 	}
 
-	resp := s.Decide(context.Background(), req)
-	if err := protocol.WriteJSONLine(conn, resp); err != nil {
-		s.Logf("flowd: write response: %v", err)
-	}
-}
-
-// Decide classifies a request and produces the response. The command path is
-// pure and never touches the network. The NL path calls the translator (if
-// configured) and returns action=replace; any failure degrades to accept.
-func (s *Server) Decide(ctx context.Context, req *protocol.Request) protocol.Response {
 	s.mu.RLock()
 	cls := s.cls
 	tr := s.translator
@@ -114,28 +109,45 @@ func (s *Server) Decide(ctx context.Context, req *protocol.Request) protocol.Res
 
 	res := cls.Classify(req.Buffer)
 
+	// Command path: pure, zero-latency, never touches the network.
 	if res.Label == classify.CMD {
-		// Zero-latency command path: accept immediately, nothing on the network.
 		s.Logf("flowd: verdict=CMD reason=%s buffer=%q", res.Reason, req.Buffer)
-		return protocol.Response{
-			Action:  protocol.ActionAccept,
-			Verdict: protocol.VerdictCMD,
-			Reason:  res.Reason,
-		}
+		_ = protocol.WriteJSONLine(conn, protocol.Response{
+			Action: protocol.ActionAccept, Verdict: protocol.VerdictCMD, Reason: res.Reason,
+		})
+		return
 	}
 
-	// NL path.
 	s.Logf("flowd: verdict=NL reason=%s cwd=%q buffer=%q", res.Reason, req.Cwd, req.Buffer)
 
+	// NL with no translator configured: degrade to accept in one phase.
 	if tr == nil {
-		// No translator configured: degrade to accept (step-2 behavior).
-		return protocol.Response{
-			Action:  protocol.ActionAccept,
-			Verdict: protocol.VerdictNL,
-			Reason:  res.Reason + "+no-translator",
-		}
+		_ = protocol.WriteJSONLine(conn, protocol.Response{
+			Action: protocol.ActionAccept, Verdict: protocol.VerdictNL,
+			Reason: res.Reason + "+no-translator",
+		})
+		return
 	}
 
+	// Phase 1: tell the widget we're translating, so it can show progress and
+	// switch to a longer read timeout. A write failure here means the client
+	// already gave up; stop.
+	if err := protocol.WriteJSONLine(conn, protocol.Response{
+		Action: protocol.ActionPending, Verdict: protocol.VerdictNL, Reason: res.Reason,
+	}); err != nil {
+		return
+	}
+
+	// Phase 2: translate and send the real reply on the same connection.
+	resp := s.translateReply(context.Background(), tr, req, res.Reason, timeout)
+	if err := protocol.WriteJSONLine(conn, resp); err != nil {
+		s.Logf("flowd: write phase-2 response: %v", err)
+	}
+}
+
+// translateReply runs the translator and builds the phase-2 response. Any
+// failure degrades to accept so the user is never blocked.
+func (s *Server) translateReply(ctx context.Context, tr Translator, req *protocol.Request, reason string, timeout time.Duration) protocol.Response {
 	if timeout <= 0 {
 		timeout = 30 * time.Second
 	}
@@ -147,22 +159,16 @@ func (s *Server) Decide(ctx context.Context, req *protocol.Request) protocol.Res
 		History: req.History,
 	}, nil)
 	if err != nil {
-		// Translation failed: degrade to accept so the user can still run their
-		// line (it'll likely hit command_not_found_handle in step 4) — never block.
 		s.Logf("flowd: translate error: %v", err)
 		return protocol.Response{
-			Action:  protocol.ActionAccept,
-			Verdict: protocol.VerdictNL,
-			Reason:  res.Reason,
-			Err:     "translate: " + err.Error(),
+			Action: protocol.ActionAccept, Verdict: protocol.VerdictNL,
+			Reason: reason, Err: "translate: " + err.Error(),
 		}
 	}
 	if result.Untranslatable {
-		// The model could not produce a command: accept the original line.
 		return protocol.Response{
-			Action:  protocol.ActionAccept,
-			Verdict: protocol.VerdictNL,
-			Reason:  res.Reason + "+untranslatable",
+			Action: protocol.ActionAccept, Verdict: protocol.VerdictNL,
+			Reason: reason + "+untranslatable",
 		}
 	}
 
@@ -171,14 +177,44 @@ func (s *Server) Decide(ctx context.Context, req *protocol.Request) protocol.Res
 		effect = protocol.EffectSideEffect
 	}
 	s.Logf("flowd: translated effect=%s -> %q", effect, result.Command)
-
 	return protocol.Response{
-		Action:  protocol.ActionReplace,
-		Verdict: protocol.VerdictNL,
-		Reason:  res.Reason,
-		Text:    result.Command,
-		Effect:  effect,
+		Action: protocol.ActionReplace, Verdict: protocol.VerdictNL,
+		Reason: reason, Text: result.Command, Effect: effect,
 	}
+}
+
+// Decide classifies a request and produces a single response (no streaming
+// phases). It is retained for unit tests and callers that want the final
+// decision in one call; the live server uses the two-phase handle path above.
+func (s *Server) Decide(ctx context.Context, req *protocol.Request) protocol.Response {
+	s.mu.RLock()
+	cls := s.cls
+	tr := s.translator
+	timeout := s.TranslateTimeout
+	s.mu.RUnlock()
+
+	res := cls.Classify(req.Buffer)
+
+	if res.Label == classify.CMD {
+		s.Logf("flowd: verdict=CMD reason=%s buffer=%q", res.Reason, req.Buffer)
+		return protocol.Response{
+			Action:  protocol.ActionAccept,
+			Verdict: protocol.VerdictCMD,
+			Reason:  res.Reason,
+		}
+	}
+
+	s.Logf("flowd: verdict=NL reason=%s cwd=%q buffer=%q", res.Reason, req.Cwd, req.Buffer)
+
+	if tr == nil {
+		return protocol.Response{
+			Action:  protocol.ActionAccept,
+			Verdict: protocol.VerdictNL,
+			Reason:  res.Reason + "+no-translator",
+		}
+	}
+
+	return s.translateReply(ctx, tr, req, res.Reason, timeout)
 }
 
 // Refresh rebuilds the classifier from the current environment plus the given

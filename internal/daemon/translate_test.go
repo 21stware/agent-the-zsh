@@ -1,9 +1,13 @@
 package daemon
 
 import (
+	"bufio"
 	"context"
 	"errors"
+	"net"
+	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/oboo/terflow/internal/protocol"
 	"github.com/oboo/terflow/internal/translate"
@@ -13,14 +17,119 @@ import (
 type fakeTranslator struct {
 	result *translate.Result
 	err    error
+	delay  time.Duration
 	gotNL  string
 	gotCtx translate.Context
 }
 
-func (f *fakeTranslator) Translate(_ context.Context, nl string, tc translate.Context, _ func(string)) (*translate.Result, error) {
+func (f *fakeTranslator) Translate(ctx context.Context, nl string, tc translate.Context, _ func(string)) (*translate.Result, error) {
 	f.gotNL = nl
 	f.gotCtx = tc
+	if f.delay > 0 {
+		select {
+		case <-time.After(f.delay):
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+	}
 	return f.result, f.err
+}
+
+// TestTwoPhaseNLOverSocket verifies the live wire behavior: an NL line with a
+// translator yields a "pending" line first, then a "replace" line — even when
+// translation takes longer than the (notional) command-path timeout. This is
+// the regression guard for the UAT bug where NL was misrun as a command because
+// the widget gave up before the ~2s translation finished.
+func TestTwoPhaseNLOverSocket(t *testing.T) {
+	sock := filepath.Join(shortSocketDir(t), "flowd.sock")
+	ln, err := Listen(sock)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ln.Close()
+	srv := New()
+	srv.Logf = func(string, ...any) {}
+	// Translation deliberately slower than a command would ever take.
+	srv.SetTranslator(&fakeTranslator{
+		result: &translate.Result{Command: "git status", Effect: translate.EffectReadOnly},
+		delay:  300 * time.Millisecond,
+	})
+	go srv.Serve(ln)
+
+	conn, err := net.Dial("unix", sock)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	if err := protocol.WriteJSONLine(conn, protocol.Request{Buffer: "帮我看看 git 状态", Proto: protocol.CurrentProto}); err != nil {
+		t.Fatal(err)
+	}
+	r := bufio.NewReader(conn)
+
+	// Phase 1 must arrive quickly and be "pending".
+	conn.SetReadDeadline(time.Now().Add(100 * time.Millisecond))
+	p1, err := protocol.ReadResponse(r)
+	if err != nil {
+		t.Fatalf("phase-1 read: %v", err)
+	}
+	if p1.Action != protocol.ActionPending {
+		t.Errorf("phase-1 action = %q, want pending", p1.Action)
+	}
+	if p1.Verdict != protocol.VerdictNL {
+		t.Errorf("phase-1 verdict = %q, want NL", p1.Verdict)
+	}
+
+	// Phase 2 arrives after translation completes, with the command.
+	conn.SetReadDeadline(time.Now().Add(2 * time.Second))
+	p2, err := protocol.ReadResponse(r)
+	if err != nil {
+		t.Fatalf("phase-2 read: %v", err)
+	}
+	if p2.Action != protocol.ActionReplace {
+		t.Errorf("phase-2 action = %q, want replace", p2.Action)
+	}
+	if p2.Text != "git status" {
+		t.Errorf("phase-2 text = %q, want %q", p2.Text, "git status")
+	}
+	if p2.Effect != protocol.EffectReadOnly {
+		t.Errorf("phase-2 effect = %q", p2.Effect)
+	}
+}
+
+// TestCommandStaysSinglePhase confirms a command verdict still sends exactly one
+// line (accept) — no pending — so the command path is never delayed.
+func TestCommandStaysSinglePhase(t *testing.T) {
+	sock := filepath.Join(shortSocketDir(t), "flowd.sock")
+	ln, err := Listen(sock)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ln.Close()
+	srv := New()
+	srv.Logf = func(string, ...any) {}
+	srv.SetTranslator(&fakeTranslator{result: &translate.Result{Command: "x"}})
+	go srv.Serve(ln)
+
+	conn, err := net.Dial("unix", sock)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	protocol.WriteJSONLine(conn, protocol.Request{Buffer: "git status", Proto: protocol.CurrentProto})
+	r := bufio.NewReader(conn)
+	conn.SetReadDeadline(time.Now().Add(time.Second))
+	p1, err := protocol.ReadResponse(r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p1.Action != protocol.ActionAccept || p1.Verdict != protocol.VerdictCMD {
+		t.Errorf("command reply = action %q verdict %q, want accept/CMD", p1.Action, p1.Verdict)
+	}
+	// No second line should come; a short read should hit EOF (conn closed by daemon).
+	conn.SetReadDeadline(time.Now().Add(200 * time.Millisecond))
+	if _, err := protocol.ReadResponse(r); err == nil {
+		t.Error("command path sent a second line; want single-phase")
+	}
 }
 
 func TestDecideCommandNeverTranslates(t *testing.T) {

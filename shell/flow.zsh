@@ -21,11 +21,13 @@
 
 # --- configuration (override before sourcing) -------------------------------
 : ${FLOW_SOCKET:="${XDG_RUNTIME_DIR:-${TMPDIR:-/tmp}/flow-${UID}}/flow/flowd.sock"}
-: ${FLOW_TIMEOUT:=0.4}      # seconds to wait for a daemon reply before degrading
+: ${FLOW_TIMEOUT:=0.4}            # phase-1 read: bounds the command path + dead daemon
+: ${FLOW_TRANSLATE_TIMEOUT:=12}   # phase-2 read: how long to wait for NL translation
 : ${FLOW_HISTORY_LINES:=10} # recent history lines sent as context
 : ${FLOW_PROTO:=1}
 : ${FLOW_MARK_READONLY:="✓ flow"}        # POSTDISPLAY tag for a read-only translation
 : ${FLOW_MARK_SIDEEFFECT:="⚠ flow: side-effect — review before Enter"}
+: ${FLOW_MARK_PENDING:="⋯ flow: translating…"}
 
 zmodload zsh/net/socket 2>/dev/null || return 0  # no socket module -> stay plain
 zmodload zsh/system 2>/dev/null || return 0
@@ -73,44 +75,49 @@ _flow_build_request() {
   print -r -- "{\"buffer\":\"$buf\",\"cwd\":\"$cwd\",\"history\":[$histjson],\"proto\":$FLOW_PROTO}"
 }
 
-# _flow_query sends the request and reads one reply line. Prints the raw JSON
-# reply on stdout. Returns non-zero on any failure (connect/write/read/timeout),
-# which the caller treats as "degrade to accept-line".
-_flow_query() {
+# _flow_open connects to the daemon and sends the request for the current
+# buffer. On success it sets the global FLOW_FD to the open socket fd and
+# returns 0. On any failure (no socket, connect, write) it returns non-zero —
+# the caller degrades to plain accept-line.
+_flow_open() {
   local sock=$(_flow_socket_path)
   [[ -S $sock ]] || return 1   # no socket -> daemon not running -> degrade
 
-  local fd
-  # zsocket sets REPLY to the fd on success.
-  if ! zsocket "$sock" 2>/dev/null; then
-    return 1
-  fi
-  fd=$REPLY
+  zsocket "$sock" 2>/dev/null || return 1
+  typeset -g FLOW_FD=$REPLY
 
   local req=$(_flow_build_request)
-  if ! print -u $fd -r -- "$req" 2>/dev/null; then
-    exec {fd}>&- 2>/dev/null
+  if ! print -u $FLOW_FD -r -- "$req" 2>/dev/null; then
+    _flow_close
     return 1
   fi
+  return 0
+}
 
-  # Read one line with a timeout. sysread -t bounds the wait so a hung daemon
-  # cannot freeze the prompt (constraint 4). A single sysread may return a
-  # partial read, so accumulate until we see a newline or the deadline passes.
+# _flow_close closes the daemon socket fd, if open.
+_flow_close() {
+  [[ -n $FLOW_FD ]] && exec {FLOW_FD}>&- 2>/dev/null
+  unset FLOW_FD
+}
+
+# _flow_read_line reads one newline-terminated JSON reply from FLOW_FD, waiting
+# at most $1 seconds. Prints the line (without newline) on success; returns
+# non-zero on timeout/EOF/error. A single sysread may return a partial read, so
+# it accumulates until a newline arrives or the deadline passes.
+_flow_read_line() {
+  local budget=$1
   local reply="" chunk
-  local deadline=$(( EPOCHREALTIME + FLOW_TIMEOUT ))
+  local deadline=$(( EPOCHREALTIME + budget ))
   while true; do
     local remain=$(( deadline - EPOCHREALTIME ))
-    (( remain <= 0 )) && { exec {fd}>&- 2>/dev/null; return 1; }
+    (( remain <= 0 )) && return 1
     chunk=""
-    if ! sysread -t $remain -i $fd chunk 2>/dev/null; then
-      # rc!=0 is timeout or EOF. If we already have a full line, use it.
-      break
+    if ! sysread -t $remain -i $FLOW_FD chunk 2>/dev/null; then
+      break   # timeout or EOF
     fi
     reply+=$chunk
     [[ $reply == *$'\n'* ]] && break
   done
-  exec {fd}>&- 2>/dev/null
-
   reply=${reply%%$'\n'*}
   [[ -z $reply ]] && return 1
   print -r -- "$reply"
@@ -178,14 +185,49 @@ flow-accept-line() {
   # Clear any lingering translation marker before deciding this line.
   _flow_clear_mark
 
+  # Open the connection and send the request.
+  if ! _flow_open; then
+    # Daemon unavailable: run the line as-is (degrade, never brick).
+    zle .accept-line
+    return
+  fi
+
+  # Phase 1: read the first reply within the short timeout. This bounds both the
+  # zero-latency command path and a dead/slow daemon. CMD comes back in
+  # microseconds; NL comes back as "pending" almost as fast.
   local reply
-  if ! reply=$(_flow_query); then
-    # Degrade path: daemon unavailable/slow/error. Run the line as-is.
+  if ! reply=$(_flow_read_line "$FLOW_TIMEOUT"); then
+    _flow_close
     zle .accept-line
     return
   fi
 
   local action=$(_flow_json_field "$reply" action)
+
+  if [[ $action == pending ]]; then
+    # NL is being translated. Show progress, then wait (longer) for phase 2.
+    POSTDISPLAY=$'\n'"$FLOW_MARK_PENDING"
+    typeset -g FLOW_MARK_ACTIVE=1
+    zle -R   # force a redraw so the user sees "translating…" while we wait
+    if ! reply=$(_flow_read_line "$FLOW_TRANSLATE_TIMEOUT"); then
+      # Translation timed out: drop the marker and accept the original line.
+      _flow_close
+      _flow_clear_mark
+      zle .reset-prompt 2>/dev/null
+      zle .accept-line
+      return
+    fi
+    action=$(_flow_json_field "$reply" action)
+  fi
+
+  _flow_close
+  _flow_apply_reply "$action" "$reply"
+}
+
+# _flow_apply_reply acts on a final daemon reply: replace the buffer (NL→command)
+# or accept the line (CMD / degrade). Shared by the phase-1 and phase-2 paths.
+_flow_apply_reply() {
+  local action=$1 reply=$2
   case $action in
     replace)
       # NL translated to a command. Replace buffer, keep cursor at end, do NOT
@@ -199,8 +241,6 @@ flow-accept-line() {
         CURSOR=${#BUFFER}
         typeset -g FLOW_LAST_TRANSLATED=$BUFFER
         # Mark the line with the effect (visual only — Enter still runs it).
-        # POSTDISPLAY shows below the buffer without polluting it; it is cleared
-        # when the user edits the line, accepts it, or undoes (handlers below).
         if [[ $FLOW_LAST_EFFECT == side-effect ]]; then
           POSTDISPLAY=$'\n'"$FLOW_MARK_SIDEEFFECT"
         else
@@ -211,10 +251,15 @@ flow-accept-line() {
         return
       fi
       # No text despite replace: degrade.
+      _flow_clear_mark
+      zle .reset-prompt 2>/dev/null
       zle .accept-line
       ;;
     accept|*)
-      # CMD verdict, or anything unexpected: accept-line (zero latency / safe).
+      # CMD verdict, untranslatable NL, or anything unexpected: run as-is. Clear
+      # any pending marker first.
+      _flow_clear_mark
+      zle .reset-prompt 2>/dev/null
       zle .accept-line
       ;;
   esac

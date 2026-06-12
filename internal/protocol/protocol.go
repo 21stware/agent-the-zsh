@@ -31,6 +31,13 @@ const (
 	// user to confirm. Reserved for step 3 (mode A translation). Defined here so
 	// the widget can be written against the final protocol now.
 	ActionReplace Action = "replace"
+
+	// ActionPending is the first line of a two-phase NL reply: the daemon has
+	// accepted the request and is translating. The widget shows a progress
+	// indicator and reads a second line (the real accept/replace) with a longer
+	// timeout. This keeps the command path bounded by the short first-phase
+	// timeout while letting NL translation take seconds.
+	ActionPending Action = "pending"
 )
 
 // Verdict is the classifier's decision, surfaced for logging/telemetry and for

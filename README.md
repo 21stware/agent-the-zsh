@@ -26,7 +26,24 @@ judgment and rewriting of a single input line.
   daemon returns `action=replace` for NL; the widget writes the command back to
   the buffer and waits for the user's Enter (never auto-runs). No API key →
   NL degrades to `accept`; the command path never touches the network.
-- Step 4 — Esc Esc undo, command_not_found fallback, side-effect confirmation. _next_
+- Step 4 — Esc Esc undo + side-effect marker ✅
+  Esc Esc restores the original NL input after a translation. Side-effecting
+  translations (rm, mv, git push…) show a `⚠` tag below the line; read-only
+  ones show `✓`. Per the "mark, don't block" choice, Enter still runs the line —
+  the tag is a visual cue, not a gate. `command_not_found` is left as plain zsh.
+- Mode B — self-built agent loop (bash/read/write/grep + per-tool permission). _next_
+
+## Try it (UAT)
+
+```sh
+./shell/flow-uat
+```
+
+Builds flowd, starts a throwaway daemon (using your env or `~/.claude/settings.json`
+provider config), and drops you into an interactive zsh with the widget loaded and
+isolated history. Type a command (runs as usual) or natural language (translated to
+the input line — press Enter to run, Esc Esc to restore your text). `exit` to quit;
+the daemon and socket are torn down automatically.
 
 ## Architecture
 

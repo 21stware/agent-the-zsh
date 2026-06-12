@@ -1,0 +1,90 @@
+#!/usr/bin/env zsh
+# flow-uat — one-command test harness for hands-on UAT.
+#
+# Starts a fresh flowd daemon (reading provider config from your environment or
+# ~/.claude/settings.json), then drops you into an interactive zsh subshell with
+# the flow widget loaded and an isolated history. Type normally:
+#
+#   • a real shell command  -> runs instantly, exactly like plain zsh
+#   • natural language (EN or 中文) -> translated to a command, written to your
+#       input line; press Enter to run it, or Esc Esc to restore what you typed
+#   • side-effecting translations (rm, mv, git push…) show a ⚠ tag below the line
+#
+# Nothing here is destructive: translations only populate the line — you decide
+# whether to press Enter. The daemon and socket are torn down on exit.
+#
+# Usage:
+#   ./shell/flow-uat            # build + launch
+#   FLOW_TIMEOUT=2 ./shell/flow-uat   # e.g. allow a slower model
+#
+# Exit the UAT shell with `exit` or Ctrl-D.
+
+set -e
+here=${0:A:h}
+repo=${here:h}
+tmp=${TMPDIR:-/tmp}; tmp=${tmp%/}   # strip trailing slash for clean paths
+sock="$tmp/flow-uat-$$.sock"
+logfile="$tmp/flow-uat-$$.log"
+bin="$tmp/flowd-uat-$$"
+
+cleanup() {
+  [[ -n $flowd_pid ]] && kill $flowd_pid 2>/dev/null
+  rm -f "$sock" "$bin"
+  print -r -- ""
+  print -r -- "flow-uat: stopped. daemon log was at $logfile"
+}
+trap cleanup EXIT INT TERM
+
+print -r -- "flow-uat: building flowd…"
+( cd "$repo" && go build -o "$bin" ./cmd/flowd )
+
+print -r -- "flow-uat: starting daemon on $sock"
+"$bin" -socket "$sock" >"$logfile" 2>&1 &
+flowd_pid=$!
+
+# Wait for the socket to appear (daemon may probe /v1/models on startup).
+for i in {1..50}; do
+  [[ -S $sock ]] && break
+  sleep 0.1
+done
+if [[ ! -S $sock ]]; then
+  print -r -- "flow-uat: daemon failed to start. log:" >&2
+  cat "$logfile" >&2
+  exit 1
+fi
+
+# The "NL translation enabled/disabled" line is logged after model discovery,
+# which can lag the socket by ~1s. Wait briefly for it so the user sees the
+# real provider/model status, not a half-initialized snapshot.
+for i in {1..30}; do
+  grep -q 'translation' "$logfile" 2>/dev/null && break
+  sleep 0.1
+done
+
+# Surface the daemon's startup lines (endpoint/model/whether NL is enabled).
+grep '^[0-9]' "$logfile" 2>/dev/null | sed 's/^/  /'
+
+print -r -- ""
+print -r -- "flow-uat: launching an interactive zsh with the flow widget."
+print -r -- "  • type a command  -> runs as usual"
+print -r -- "  • type NL (try: 列出当前目录的 go 文件 / show disk usage / delete the dist dir)"
+print -r -- "  • Enter runs the translated command; Esc Esc restores your original text"
+print -r -- "  • 'exit' or Ctrl-D to quit"
+print -r -- ""
+
+# Launch an interactive zsh with a minimal rcfile that loads the widget and
+# points it at our socket. Isolated history so UAT input doesn't pollute yours.
+zdotdir="$tmp/flow-uat-zdot-$$"
+mkdir -p "$zdotdir"
+cat > "$zdotdir/.zshrc" <<RC
+# inherit the user's normal interactive setup if present, then load flow
+[[ -f ~/.zshrc ]] && source ~/.zshrc
+export FLOW_SOCKET="$sock"
+export HISTFILE="$zdotdir/.history"
+PROMPT='%F{cyan}flow-uat%f %~ %# '
+source "$repo/shell/flow.zsh"
+print -r -- "flow widget loaded (FLOW_SOCKET=\$FLOW_SOCKET)"
+RC
+
+ZDOTDIR="$zdotdir" zsh -i || true
+rm -rf "$zdotdir"

@@ -5,14 +5,16 @@
 # Design constraints honored here (see project spec):
 #   1. Zero latency for commands: the local unix-socket round-trip is sub-ms;
 #      on a CMD verdict we accept-line immediately. Nothing touches the network.
+#   3. Reversible: a translated NL command is written to the buffer and waits at
+#      end-of-line — never auto-run. Esc Esc restores the original input.
 #   4. Fail to degrade: if the daemon is missing, slow, or errors, we fall back
 #      to a plain accept-line. flow never bricks the terminal. A non-zero
 #      $FLOW_TIMEOUT bounds the worst case.
 #
-# Step 2 scope: the daemon always returns action=accept, so this widget is
-# functionally a transparent passthrough — the user experiences a normal zsh.
-# The action=replace branch is wired up now (against the final protocol) but the
-# daemon does not emit it until step 3.
+# NL verdicts are translated to one shell command (action=replace) and written
+# back to the buffer. Side-effecting translations are tagged with a ⚠ marker
+# below the line (visual only; Enter still runs it — per the "mark, don't block"
+# choice). Esc Esc restores the original natural-language input.
 #
 # Install: source this file from ~/.zshrc, after starting flowd.
 #   source /path/to/flow.zsh
@@ -22,6 +24,8 @@
 : ${FLOW_TIMEOUT:=0.4}      # seconds to wait for a daemon reply before degrading
 : ${FLOW_HISTORY_LINES:=10} # recent history lines sent as context
 : ${FLOW_PROTO:=1}
+: ${FLOW_MARK_READONLY:="✓ flow"}        # POSTDISPLAY tag for a read-only translation
+: ${FLOW_MARK_SIDEEFFECT:="⚠ flow: side-effect — review before Enter"}
 
 zmodload zsh/net/socket 2>/dev/null || return 0  # no socket module -> stay plain
 zmodload zsh/system 2>/dev/null || return 0
@@ -171,6 +175,9 @@ flow-accept-line() {
     return
   fi
 
+  # Clear any lingering translation marker before deciding this line.
+  _flow_clear_mark
+
   local reply
   if ! reply=$(_flow_query); then
     # Degrade path: daemon unavailable/slow/error. Run the line as-is.
@@ -185,11 +192,21 @@ flow-accept-line() {
       # accept — the user reviews and presses Enter again (constraint 3).
       local text=$(_flow_json_string "$reply" text)
       if [[ -n $text ]]; then
-        # Save the ORIGINAL input BEFORE overwriting, for Esc Esc undo (step 4).
+        # Save the ORIGINAL input BEFORE overwriting, for Esc Esc undo.
         typeset -g FLOW_LAST_ORIGINAL=$BUFFER
         typeset -g FLOW_LAST_EFFECT=$(_flow_json_field "$reply" effect)
         BUFFER=$(_flow_json_unescape "$text")
         CURSOR=${#BUFFER}
+        typeset -g FLOW_LAST_TRANSLATED=$BUFFER
+        # Mark the line with the effect (visual only — Enter still runs it).
+        # POSTDISPLAY shows below the buffer without polluting it; it is cleared
+        # when the user edits the line, accepts it, or undoes (handlers below).
+        if [[ $FLOW_LAST_EFFECT == side-effect ]]; then
+          POSTDISPLAY=$'\n'"$FLOW_MARK_SIDEEFFECT"
+        else
+          POSTDISPLAY=$'\n'"$FLOW_MARK_READONLY"
+        fi
+        typeset -g FLOW_MARK_ACTIVE=1
         zle .reset-prompt 2>/dev/null
         return
       fi
@@ -203,6 +220,39 @@ flow-accept-line() {
   esac
 }
 
+# _flow_clear_mark removes the POSTDISPLAY tag and translation bookkeeping once
+# the user starts editing, accepts, or undoes the line.
+_flow_clear_mark() {
+  if [[ -n $FLOW_MARK_ACTIVE ]]; then
+    POSTDISPLAY=""
+    unset FLOW_MARK_ACTIVE FLOW_LAST_TRANSLATED
+  fi
+}
+
+# flow-undo restores the original natural-language input after a translation.
+# Bound to Esc Esc (constraint 3: one-keystroke recovery of the original).
+flow-undo() {
+  if [[ -n ${FLOW_LAST_ORIGINAL+x} ]]; then
+    BUFFER=$FLOW_LAST_ORIGINAL
+    CURSOR=${#BUFFER}
+    unset FLOW_LAST_ORIGINAL FLOW_LAST_EFFECT
+    _flow_clear_mark
+    zle .reset-prompt 2>/dev/null
+  fi
+}
+
+# _flow_line_pre_redraw drops the marker as soon as the user edits the line away
+# from the translated text. Registered as a zle-line-pre-redraw hook so it runs
+# on every redraw without wrapping individual editing widgets.
+_flow_line_pre_redraw() {
+  if [[ -n $FLOW_MARK_ACTIVE && $BUFFER != $FLOW_LAST_TRANSLATED ]]; then
+    _flow_clear_mark
+  fi
+}
+
 zle -N flow-accept-line
+zle -N flow-undo
+zle -N zle-line-pre-redraw _flow_line_pre_redraw
 bindkey '^M' flow-accept-line   # Enter / Return
 bindkey '^J' flow-accept-line   # Ctrl-J / line feed
+bindkey '\e\e' flow-undo        # Esc Esc — restore original NL input

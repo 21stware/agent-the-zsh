@@ -286,13 +286,22 @@ flow-accept-line() {
   _flow_dbg "  phase1 reply: $reply"
 
   if [[ $action == pending ]]; then
-    # NL is being translated. Animate a spinner + rotating word while we wait
-    # (longer) for phase 2.
+    # NL needs routing/translation (2-6s with the capable model). Immediately
+    # replace the typed text with the thinking animation so the moment the user
+    # presses Enter they see motion, not a frozen line. Save the original to
+    # restore if routing can't produce a command.
+    typeset -g FLOW_PENDING_ORIGINAL=$BUFFER
+    BUFFER=""
+    CURSOR=0
+    zle .reset-prompt 2>/dev/null
     if ! reply=$(_flow_read_line_animated "$FLOW_TRANSLATE_TIMEOUT"); then
-      # Translation timed out: drop the marker and accept the original line.
+      # Routing timed out: restore the original line and run it as-is.
       _flow_dbg "  phase2 TIMEOUT/err (>${FLOW_TRANSLATE_TIMEOUT}s) -> accept original"
       _flow_close
       _flow_clear_mark
+      BUFFER=$FLOW_PENDING_ORIGINAL
+      CURSOR=${#BUFFER}
+      unset FLOW_PENDING_ORIGINAL
       zle .reset-prompt 2>/dev/null
       zle .accept-line
       return
@@ -309,6 +318,10 @@ flow-accept-line() {
 # or accept the line (CMD / degrade). Shared by the phase-1 and phase-2 paths.
 _flow_apply_reply() {
   local action=$1 reply=$2
+  # The original typed input: if we animated (cleared the line during pending),
+  # it's stashed in FLOW_PENDING_ORIGINAL; otherwise it's still in BUFFER.
+  local orig=${FLOW_PENDING_ORIGINAL-$BUFFER}
+  unset FLOW_PENDING_ORIGINAL
   case $action in
     agent)
       # Route to mode B. Run flow-agent cleanly via a precmd hook instead of
@@ -317,8 +330,8 @@ _flow_apply_reply() {
       # clear the input line, accept it (empty), and a one-shot precmd runs the
       # agent in the foreground before the next prompt is drawn.
       local task=$(_flow_json_unescape "$(_flow_json_string "$reply" text)")
-      [[ -z $task ]] && task=$BUFFER
-      typeset -g FLOW_LAST_ORIGINAL=$BUFFER
+      [[ -z $task ]] && task=$orig
+      typeset -g FLOW_LAST_ORIGINAL=$orig
       typeset -g FLOW_PENDING_AGENT_TASK=$task
       _flow_clear_mark
       BUFFER=""
@@ -329,13 +342,15 @@ _flow_apply_reply() {
       local text=$(_flow_json_string "$reply" text)
       if [[ -z $text ]]; then
         _flow_clear_mark
+        BUFFER=$orig
+        CURSOR=${#BUFFER}
         zle .reset-prompt 2>/dev/null
         zle .accept-line
         return
       fi
       local effect=$(_flow_json_field "$reply" effect)
       local cmd=$(_flow_json_unescape "$text")
-      typeset -g FLOW_LAST_ORIGINAL=$BUFFER
+      typeset -g FLOW_LAST_ORIGINAL=$orig
       typeset -g FLOW_LAST_EFFECT=$effect
 
       # Three-tier review for translated commands (mirrors the agent's gate):
@@ -369,9 +384,11 @@ _flow_apply_reply() {
       zle .reset-prompt 2>/dev/null
       ;;
     accept|*)
-      # CMD verdict, untranslatable NL, or anything unexpected: run as-is. Clear
-      # any pending marker first.
+      # CMD verdict, untranslatable NL, or anything unexpected: run as-is.
+      # Restore the original input (cleared during the animation) and run it.
       _flow_clear_mark
+      BUFFER=$orig
+      CURSOR=${#BUFFER}
       zle .reset-prompt 2>/dev/null
       zle .accept-line
       ;;

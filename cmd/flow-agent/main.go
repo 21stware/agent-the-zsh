@@ -103,7 +103,7 @@ func main() {
 
 	r := newRunner(level)
 
-	fmt.Printf("%s flow agent%s  %sdir %s · review %s%s\n",
+	fmt.Printf("%s flow %s  %sdir %s · review %s%s\n",
 		cBold+cCyan, cReset, cDim, cwd, level, cReset)
 	fmt.Printf("%s task: %s%s\n\n", cDim, task, cReset)
 

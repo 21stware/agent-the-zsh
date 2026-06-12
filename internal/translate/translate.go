@@ -49,7 +49,17 @@ const AgentSentinel = "## AGENT"
 // Context carries the situational inputs for a translation.
 type Context struct {
 	CWD     string
-	History []string // recent commands, oldest first
+	History []string // recent shell commands, oldest first
+	// Session is recent NL routing turns ("you said X -> I produced Y"), oldest
+	// first, so follow-ups like "make that recursive" resolve against the prior
+	// answer.
+	Session []SessionTurn
+}
+
+// SessionTurn is one prior NL exchange in the conversation.
+type SessionTurn struct {
+	Request string // the user's natural-language input
+	Result  string // what flow produced (a command, or "[handed to agent]")
 }
 
 // Translator wraps an llm.Client with the mode-A configuration.
@@ -133,6 +143,16 @@ func buildUserMessage(nl string, tc Context) string {
 		for _, line := range h {
 			b.WriteString("  ")
 			b.WriteString(line)
+			b.WriteString("\n")
+		}
+	}
+	if len(tc.Session) > 0 {
+		b.WriteString("Recent flow conversation (for follow-up context):\n")
+		for _, turn := range tc.Session {
+			b.WriteString("  user: ")
+			b.WriteString(turn.Request)
+			b.WriteString("\n  flow: ")
+			b.WriteString(turn.Result)
 			b.WriteString("\n")
 		}
 	}

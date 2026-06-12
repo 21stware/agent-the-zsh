@@ -144,6 +144,7 @@ func (a *streamAssembler) handle(ev sseEvent) error {
 				Type        string `json:"type"`
 				Text        string `json:"text"`
 				PartialJSON string `json:"partial_json"`
+				Thinking    string `json:"thinking"`
 			} `json:"delta"`
 		}
 		if err := json.Unmarshal(ev.data, &p); err != nil {
@@ -160,6 +161,8 @@ func (a *streamAssembler) handle(ev sseEvent) error {
 		case "input_json_delta":
 			bb.inputJSON.WriteString(p.Delta.PartialJSON)
 			a.emit(StreamEvent{Kind: "tool_input", PartialJSON: p.Delta.PartialJSON})
+		case "thinking_delta":
+			a.emit(StreamEvent{Kind: "thinking", Text: p.Delta.Thinking})
 		}
 
 	case "content_block_stop":

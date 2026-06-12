@@ -29,7 +29,7 @@
 : ${FLOW_DEBUG_LOG:="${TMPDIR:-/tmp}/flow-widget.log"}
 : ${FLOW_MARK_READONLY:="✓ flow"}        # POSTDISPLAY tag for a read-only translation
 : ${FLOW_MARK_SIDEEFFECT:="⚠ flow: side-effect — review before Enter"}
-: ${FLOW_MARK_PENDING:="⋯ flow: translating…"}
+: ${FLOW_MARK_PENDING:="…"}
 
 zmodload zsh/net/socket 2>/dev/null || return 0  # no socket module -> stay plain
 zmodload zsh/system 2>/dev/null || return 0
@@ -82,6 +82,20 @@ _flow_build_request() {
   done
   local histjson="${(j:,:)hist}"
   print -r -- "{\"buffer\":\"$buf\",\"cwd\":\"$cwd\",\"history\":[$histjson],\"proto\":$FLOW_PROTO}"
+}
+
+# _flow_clear_session tells the daemon to reset the NL conversation context.
+# Best-effort: silently does nothing if the daemon is unreachable.
+_flow_clear_session() {
+  local sock=$(_flow_socket_path)
+  [[ -S $sock ]] || return 0
+  zsocket "$sock" 2>/dev/null || return 0
+  local fd=$REPLY
+  print -u $fd -r -- "{\"clear\":true,\"proto\":$FLOW_PROTO}" 2>/dev/null
+  # read+discard the ack with a short timeout, then close
+  local junk
+  sysread -t 0.4 -i $fd junk 2>/dev/null
+  exec {fd}>&- 2>/dev/null
 }
 
 # _flow_open connects to the daemon and sends the request for the current
@@ -191,6 +205,17 @@ flow-accept-line() {
     return
   fi
 
+  # `flowclear`: reset the daemon's NL conversation context, then clear the line.
+  if [[ ${BUFFER// /} == flowclear ]]; then
+    _flow_clear_session
+    _flow_clear_mark
+    BUFFER=""
+    POSTDISPLAY=$'\n'"flow: conversation cleared"
+    typeset -g FLOW_MARK_ACTIVE=1
+    zle .reset-prompt 2>/dev/null
+    return
+  fi
+
   # Clear any lingering translation marker before deciding this line.
   _flow_clear_mark
   _flow_dbg "accept-line: buffer=[$BUFFER]"
@@ -245,17 +270,18 @@ _flow_apply_reply() {
   local action=$1 reply=$2
   case $action in
     agent)
-      # Route to mode B. Replace the line with a flow-agent invocation and run
-      # it: flow-agent takes over the foreground terminal (full TTY, real cwd),
-      # can prompt for approval, and returns to the prompt when done. We quote
-      # the task so it is a single argument. The original NL is saved for Esc Esc.
+      # Route to mode B. flow-agent takes over the foreground terminal (full
+      # TTY, real cwd, can prompt). To avoid echoing a long `flow-agent '<task>'`
+      # line, pass the task via an exported env var and run a bare invocation;
+      # the visible command is just the launcher name. The original NL is saved
+      # for Esc Esc.
       local task=$(_flow_json_unescape "$(_flow_json_string "$reply" text)")
       [[ -z $task ]] && task=$BUFFER
       typeset -g FLOW_LAST_ORIGINAL=$BUFFER
       _flow_clear_mark
-      # Use the configured launcher; default to `flow-agent` on PATH.
-      local q=${task//\'/\'\\\'\'}   # single-quote-escape the task
-      BUFFER="${FLOW_AGENT_CMD:-flow-agent} '$q'"
+      export FLOW_TASK=$task
+      # Bare launcher invocation; reads FLOW_TASK. -q keeps it quiet about argv.
+      BUFFER="${FLOW_AGENT_CMD:-flow-agent}"
       CURSOR=${#BUFFER}
       zle .reset-prompt 2>/dev/null
       zle .accept-line

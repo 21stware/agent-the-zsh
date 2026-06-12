@@ -67,6 +67,9 @@ type Request struct {
 	History []string `json:"history,omitempty"`
 	// Proto lets the daemon reject mismatched clients. Bumped on breaking changes.
 	Proto int `json:"proto"`
+	// Clear, when true, resets the daemon's NL conversation session and the
+	// daemon replies immediately without classifying. Triggered by `flowclear`.
+	Clear bool `json:"clear,omitempty"`
 }
 
 // Response is returned by the daemon for a Request.

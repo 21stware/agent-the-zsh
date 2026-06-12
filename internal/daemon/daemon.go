@@ -46,9 +46,16 @@ type Server struct {
 	// TranslateTimeout bounds a single NL translation. Zero uses a default.
 	TranslateTimeout time.Duration
 
+	// session is the recent NL conversation, for follow-up context. Guarded by
+	// mu. Bounded to sessionMax turns.
+	session []translate.SessionTurn
+
 	// Logf is where verdicts and errors go. Defaults to the standard logger.
 	Logf func(format string, args ...any)
 }
+
+// sessionMax bounds how many recent NL turns are kept for follow-up context.
+const sessionMax = 6
 
 // New builds a Server with a classifier derived from the current environment and
 // no translator (NL path disabled). Use SetTranslator to enable mode A.
@@ -97,6 +104,18 @@ func (s *Server) handle(conn net.Conn) {
 		_ = protocol.WriteJSONLine(conn, protocol.Response{
 			Action: protocol.ActionAccept,
 			Err:    "bad request: " + err.Error(),
+		})
+		return
+	}
+
+	// flowclear: reset the NL conversation and acknowledge immediately.
+	if req.Clear {
+		s.mu.Lock()
+		s.session = nil
+		s.mu.Unlock()
+		s.Logf("flowd: session cleared")
+		_ = protocol.WriteJSONLine(conn, protocol.Response{
+			Action: protocol.ActionAccept, Reason: "session-cleared",
 		})
 		return
 	}
@@ -157,6 +176,7 @@ func (s *Server) translateReply(ctx context.Context, tr Translator, req *protoco
 	result, err := tr.Translate(tctx, req.Buffer, translate.Context{
 		CWD:     req.Cwd,
 		History: req.History,
+		Session: s.snapshotSession(),
 	}, nil)
 	if err != nil {
 		s.Logf("flowd: translate error: %v", err)
@@ -173,6 +193,8 @@ func (s *Server) translateReply(ctx context.Context, tr Translator, req *protoco
 	}
 	if result.Agent {
 		// Route to mode B: the widget hands the original NL task to flow-agent.
+		// Record the turn so a later NL follow-up has context.
+		s.recordSession(req.Buffer, "[handed to the agent]")
 		s.Logf("flowd: routed to agent: %q", req.Buffer)
 		return protocol.Response{
 			Action: protocol.ActionAgent, Verdict: protocol.VerdictNL,
@@ -184,10 +206,33 @@ func (s *Server) translateReply(ctx context.Context, tr Translator, req *protoco
 	if result.Effect == translate.EffectSideEffect {
 		effect = protocol.EffectSideEffect
 	}
+	s.recordSession(req.Buffer, result.Command)
 	s.Logf("flowd: translated effect=%s -> %q", effect, result.Command)
 	return protocol.Response{
 		Action: protocol.ActionReplace, Verdict: protocol.VerdictNL,
 		Reason: reason, Text: result.Command, Effect: effect,
+	}
+}
+
+// snapshotSession returns a copy of the current NL conversation turns.
+func (s *Server) snapshotSession() []translate.SessionTurn {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if len(s.session) == 0 {
+		return nil
+	}
+	out := make([]translate.SessionTurn, len(s.session))
+	copy(out, s.session)
+	return out
+}
+
+// recordSession appends an NL turn, trimming to the most recent sessionMax.
+func (s *Server) recordSession(request, result string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.session = append(s.session, translate.SessionTurn{Request: request, Result: result})
+	if len(s.session) > sessionMax {
+		s.session = s.session[len(s.session)-sessionMax:]
 	}
 }
 

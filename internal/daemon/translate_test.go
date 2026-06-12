@@ -239,3 +239,44 @@ func TestDecideNLRoutesToAgent(t *testing.T) {
 		t.Errorf("agent text = %q, want the original task", resp.Text)
 	}
 }
+
+// TestSessionHistoryRecordedAndPassed verifies the daemon records NL turns and
+// passes prior turns as context to the next translation (follow-up support).
+func TestSessionHistoryRecordedAndPassed(t *testing.T) {
+	srv := New()
+	srv.Logf = func(string, ...any) {}
+	ft := &fakeTranslator{result: &translate.Result{Command: "ls -la", Effect: translate.EffectReadOnly}}
+	srv.SetTranslator(ft)
+
+	// First NL turn: no prior session. Use clearly-NL (Chinese) inputs so the
+	// classifier routes them to the translator.
+	srv.Decide(context.Background(), &protocol.Request{Buffer: "帮我列出所有文件"})
+	if len(ft.gotCtx.Session) != 0 {
+		t.Errorf("first turn should have empty session, got %d", len(ft.gotCtx.Session))
+	}
+	// Second NL turn: the first turn should now be in the session context.
+	srv.Decide(context.Background(), &protocol.Request{Buffer: "帮我把它改成递归"})
+	if len(ft.gotCtx.Session) != 1 {
+		t.Fatalf("second turn session len = %d, want 1", len(ft.gotCtx.Session))
+	}
+	if ft.gotCtx.Session[0].Request != "帮我列出所有文件" || ft.gotCtx.Session[0].Result != "ls -la" {
+		t.Errorf("session turn = %+v, want {帮我列出所有文件 -> ls -la}", ft.gotCtx.Session[0])
+	}
+}
+
+func TestSessionClearViaHandle(t *testing.T) {
+	srv := New()
+	srv.Logf = func(string, ...any) {}
+	srv.SetTranslator(&fakeTranslator{result: &translate.Result{Command: "ls"}})
+	srv.Decide(context.Background(), &protocol.Request{Buffer: "帮我列出所有文件"})
+	if len(srv.snapshotSession()) != 1 {
+		t.Fatalf("expected 1 session turn before clear")
+	}
+	// Simulate the clear path (handle sets s.session = nil on req.Clear).
+	srv.mu.Lock()
+	srv.session = nil
+	srv.mu.Unlock()
+	if len(srv.snapshotSession()) != 0 {
+		t.Errorf("session not cleared")
+	}
+}

@@ -247,6 +247,61 @@ func TestStreamToolUse(t *testing.T) {
 	}
 }
 
+// TestStreamThinking verifies thinking_delta events surface as kind=thinking.
+func TestStreamThinking(t *testing.T) {
+	const sse = `event: message_start
+data: {"type":"message_start","message":{"model":"m","usage":{"input_tokens":5}}}
+
+event: content_block_start
+data: {"type":"content_block_start","index":0,"content_block":{"type":"thinking","thinking":""}}
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"Let me consider "}}
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"the options."}}
+
+event: content_block_stop
+data: {"type":"content_block_stop","index":0}
+
+event: content_block_start
+data: {"type":"content_block_start","index":1,"content_block":{"type":"text","text":""}}
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"answer"}}
+
+event: message_delta
+data: {"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":3}}
+
+event: message_stop
+data: {"type":"message_stop"}
+
+`
+	srv, _, _ := sseServer(t, 200, sse)
+	c := New("k", WithBaseURL(srv.URL))
+	var thinking, text string
+	resp, err := c.Stream(context.Background(), Request{
+		Model: ModelCapable, MaxTokens: 64, Thinking: AdaptiveThinking(),
+		Messages: []Message{{Role: RoleUser, Content: []ContentBlock{TextBlock("hi")}}},
+	}, func(ev StreamEvent) {
+		switch ev.Kind {
+		case "thinking":
+			thinking += ev.Text
+		case "text":
+			text += ev.Text
+		}
+	})
+	if err != nil {
+		t.Fatalf("Stream: %v", err)
+	}
+	if thinking != "Let me consider the options." {
+		t.Errorf("thinking = %q", thinking)
+	}
+	if resp.Text() != "answer" || text != "answer" {
+		t.Errorf("text = %q / streamed %q", resp.Text(), text)
+	}
+}
+
 func TestStreamAPIError(t *testing.T) {
 	body := `{"type":"error","error":{"type":"authentication_error","message":"invalid x-api-key"}}`
 	srv, _, _ := sseServer(t, 401, body)

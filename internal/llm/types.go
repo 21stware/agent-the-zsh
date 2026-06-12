@@ -150,12 +150,26 @@ type Tool struct {
 
 // Request is the body of POST /v1/messages.
 type Request struct {
-	Model     string    `json:"model"`
-	MaxTokens int       `json:"max_tokens"`
-	System    string    `json:"system,omitempty"`
-	Messages  []Message `json:"messages"`
-	Tools     []Tool    `json:"tools,omitempty"`
-	Stream    bool      `json:"stream,omitempty"`
+	Model     string         `json:"model"`
+	MaxTokens int            `json:"max_tokens"`
+	System    string         `json:"system,omitempty"`
+	Messages  []Message      `json:"messages"`
+	Tools     []Tool         `json:"tools,omitempty"`
+	Stream    bool           `json:"stream,omitempty"`
+	Thinking  *ThinkingParam `json:"thinking,omitempty"`
+}
+
+// ThinkingParam enables extended/adaptive thinking. For Claude 4.6+ use
+// {Type:"adaptive", Display:"summarized"} to receive visible reasoning.
+type ThinkingParam struct {
+	Type    string `json:"type"`              // "adaptive" | "enabled" | "disabled"
+	Display string `json:"display,omitempty"` // "summarized" | "omitted"
+}
+
+// AdaptiveThinking returns an adaptive-thinking param with summarized display,
+// so the model streams visible reasoning (thinking_delta events).
+func AdaptiveThinking() *ThinkingParam {
+	return &ThinkingParam{Type: "adaptive", Display: "summarized"}
 }
 
 // StopReason mirrors the API's response stop_reason values we care about.

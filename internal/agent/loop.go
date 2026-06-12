@@ -48,6 +48,8 @@ type ToolCall struct {
 type Events struct {
 	// OnText streams assistant narration text deltas.
 	OnText func(string)
+	// OnThinking streams the model's reasoning deltas (when thinking is on).
+	OnThinking func(string)
 	// OnToolStart fires when a tool is about to run (after approval).
 	OnToolStart func(call ToolCall)
 	// OnToolResult fires after a tool runs, with its (possibly truncated) output.
@@ -116,10 +118,18 @@ func (l *Loop) Run(ctx context.Context, task string) (string, error) {
 			System:    system,
 			Messages:  msgs,
 			Tools:     defs,
+			Thinking:  llm.AdaptiveThinking(),
 		}
 		resp, err := l.client.Stream(ctx, req, func(ev llm.StreamEvent) {
-			if ev.Kind == "text" && l.events.OnText != nil {
-				l.events.OnText(ev.Text)
+			switch ev.Kind {
+			case "text":
+				if l.events.OnText != nil {
+					l.events.OnText(ev.Text)
+				}
+			case "thinking":
+				if l.events.OnThinking != nil {
+					l.events.OnThinking(ev.Text)
+				}
 			}
 		})
 		if err != nil {

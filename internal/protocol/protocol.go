@@ -66,10 +66,20 @@ type Response struct {
 	Reason string `json:"reason,omitempty"`
 	// Text is the replacement buffer when Action == "replace" (step 3).
 	Text string `json:"text,omitempty"`
+	// Effect classifies a translated command's blast radius: "read-only" or
+	// "side-effect". Set when Action == "replace". The widget uses it in step 4
+	// to decide whether to require an explicit confirmation keystroke.
+	Effect string `json:"effect,omitempty"`
 	// Err carries a daemon-side error string. The widget treats any error as a
 	// reason to fall back to plain accept-line (never brick the terminal).
 	Err string `json:"err,omitempty"`
 }
+
+// Effect values for Response.Effect.
+const (
+	EffectReadOnly   = "read-only"
+	EffectSideEffect = "side-effect"
+)
 
 // CurrentProto is the protocol version this build speaks.
 const CurrentProto = 1

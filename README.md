@@ -19,8 +19,14 @@ judgment and rewriting of a single input line.
   `flowd` daemon classifies each line over a unix socket; the zsh widget
   (`shell/flow.zsh`) accepts commands immediately and degrades to plain zsh if
   the daemon is unavailable. Local round-trip ~70µs.
-- Step 3 — NL→command translation (mode A). _next_
-- Step 4 — Esc Esc undo, command_not_found fallback, side-effect confirmation.
+- **Step 3 — NL→command translation (mode A)** ✅
+  Self-built Anthropic client (`internal/llm`: raw HTTP/JSON + SSE, no SDK).
+  `internal/translate` turns NL into one shell command via a fast model,
+  streaming, and classifies its blast radius (read-only vs side-effect). The
+  daemon returns `action=replace` for NL; the widget writes the command back to
+  the buffer and waits for the user's Enter (never auto-runs). No API key →
+  NL degrades to `accept`; the command path never touches the network.
+- Step 4 — Esc Esc undo, command_not_found fallback, side-effect confirmation. _next_
 
 ## Architecture
 

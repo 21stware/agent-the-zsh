@@ -1,41 +1,71 @@
 // Package daemon is the flowd server: it listens on a unix socket and answers
 // one classification request per connection. It holds the classifier (built
-// from the live environment) and, in later steps, the Claude session.
+// from the live environment) and, for the NL path, a translator backed by the
+// self-built llm client.
 //
-// Step 2 scope: every request is classified and answered with action=accept.
-// The verdict (CMD/NL) is logged and returned for annotation, but NL is NOT yet
-// translated — that is step 3. This keeps the tool fully transparent: the user
-// experiences a plain zsh, with the daemon observing in the background.
+// Step 3 scope: command verdicts still return action=accept with zero network
+// involvement. NL verdicts are translated to a single shell command (mode A)
+// and returned as action=replace, for the widget to write back to the buffer
+// and await the user's confirmation. If translation is unconfigured (no API
+// key) or fails, the daemon degrades to action=accept — never bricking, never
+// blocking the command path.
 package daemon
 
 import (
 	"bufio"
+	"context"
 	"log"
 	"net"
 	"sync"
+	"time"
 
 	"github.com/oboo/terflow/internal/classify"
 	"github.com/oboo/terflow/internal/env"
 	"github.com/oboo/terflow/internal/protocol"
+	"github.com/oboo/terflow/internal/translate"
 )
 
+// Translator is the NL→command interface the daemon depends on. The concrete
+// implementation is *translate.Translator; the interface keeps the daemon
+// unit-testable without the network.
+type Translator interface {
+	Translate(ctx context.Context, nl string, tc translate.Context, onDelta func(string)) (*translate.Result, error)
+}
+
 // Server holds daemon state. The classifier is read-only after construction, so
-// concurrent connections can share it without locking; mu guards refreshes.
+// concurrent connections can share it without locking; mu guards refreshes. The
+// translator is set once at construction (or left nil to disable the NL path).
 type Server struct {
 	mu  sync.RWMutex
 	cls *classify.Classifier
+
+	// translator handles NL verdicts. Nil disables translation (degrade to
+	// accept), e.g. when ANTHROPIC_API_KEY is unset.
+	translator Translator
+
+	// TranslateTimeout bounds a single NL translation. Zero uses a default.
+	TranslateTimeout time.Duration
 
 	// Logf is where verdicts and errors go. Defaults to the standard logger.
 	Logf func(format string, args ...any)
 }
 
-// New builds a Server with a classifier derived from the current environment.
+// New builds a Server with a classifier derived from the current environment and
+// no translator (NL path disabled). Use SetTranslator to enable mode A.
 func New() *Server {
 	known := env.Known()
 	return &Server{
-		cls:  classify.New(env.Keys(known)),
-		Logf: log.Printf,
+		cls:              classify.New(env.Keys(known)),
+		TranslateTimeout: 30 * time.Second,
+		Logf:             log.Printf,
 	}
+}
+
+// SetTranslator enables the NL path with the given translator.
+func (s *Server) SetTranslator(t Translator) {
+	s.mu.Lock()
+	s.translator = t
+	s.mu.Unlock()
 }
 
 // Serve accepts connections on ln until it is closed. Each connection is
@@ -51,9 +81,7 @@ func (s *Server) Serve(ln net.Listener) error {
 	}
 }
 
-// handle processes a single connection: read one request, classify, reply.
-// Connections are one-shot in step 2 (request/response then close), which keeps
-// the widget simple and avoids any cross-request state on the hot path.
+// handle processes a single connection: read one request, decide, reply.
 func (s *Server) handle(conn net.Conn) {
 	defer conn.Close()
 	r := bufio.NewReader(conn)
@@ -68,33 +96,88 @@ func (s *Server) handle(conn net.Conn) {
 		return
 	}
 
-	resp := s.Decide(req)
+	resp := s.Decide(context.Background(), req)
 	if err := protocol.WriteJSONLine(conn, resp); err != nil {
 		s.Logf("flowd: write response: %v", err)
 	}
 }
 
-// Decide runs the classifier for a request and produces the step-2 response.
-// Split out from handle so it is unit-testable without a socket.
-func (s *Server) Decide(req *protocol.Request) protocol.Response {
+// Decide classifies a request and produces the response. The command path is
+// pure and never touches the network. The NL path calls the translator (if
+// configured) and returns action=replace; any failure degrades to accept.
+func (s *Server) Decide(ctx context.Context, req *protocol.Request) protocol.Response {
 	s.mu.RLock()
 	cls := s.cls
+	tr := s.translator
+	timeout := s.TranslateTimeout
 	s.mu.RUnlock()
 
 	res := cls.Classify(req.Buffer)
-	verdict := protocol.VerdictCMD
-	if res.Label == classify.NL {
-		verdict = protocol.VerdictNL
+
+	if res.Label == classify.CMD {
+		// Zero-latency command path: accept immediately, nothing on the network.
+		s.Logf("flowd: verdict=CMD reason=%s buffer=%q", res.Reason, req.Buffer)
+		return protocol.Response{
+			Action:  protocol.ActionAccept,
+			Verdict: protocol.VerdictCMD,
+			Reason:  res.Reason,
+		}
 	}
 
-	s.Logf("flowd: verdict=%s reason=%s cwd=%q buffer=%q",
-		verdict, res.Reason, req.Cwd, req.Buffer)
+	// NL path.
+	s.Logf("flowd: verdict=NL reason=%s cwd=%q buffer=%q", res.Reason, req.Cwd, req.Buffer)
 
-	// Step 2: always accept. NL translation (action=replace) arrives in step 3.
+	if tr == nil {
+		// No translator configured: degrade to accept (step-2 behavior).
+		return protocol.Response{
+			Action:  protocol.ActionAccept,
+			Verdict: protocol.VerdictNL,
+			Reason:  res.Reason + "+no-translator",
+		}
+	}
+
+	if timeout <= 0 {
+		timeout = 30 * time.Second
+	}
+	tctx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+
+	result, err := tr.Translate(tctx, req.Buffer, translate.Context{
+		CWD:     req.Cwd,
+		History: req.History,
+	}, nil)
+	if err != nil {
+		// Translation failed: degrade to accept so the user can still run their
+		// line (it'll likely hit command_not_found_handle in step 4) — never block.
+		s.Logf("flowd: translate error: %v", err)
+		return protocol.Response{
+			Action:  protocol.ActionAccept,
+			Verdict: protocol.VerdictNL,
+			Reason:  res.Reason,
+			Err:     "translate: " + err.Error(),
+		}
+	}
+	if result.Untranslatable {
+		// The model could not produce a command: accept the original line.
+		return protocol.Response{
+			Action:  protocol.ActionAccept,
+			Verdict: protocol.VerdictNL,
+			Reason:  res.Reason + "+untranslatable",
+		}
+	}
+
+	effect := protocol.EffectReadOnly
+	if result.Effect == translate.EffectSideEffect {
+		effect = protocol.EffectSideEffect
+	}
+	s.Logf("flowd: translated effect=%s -> %q", effect, result.Command)
+
 	return protocol.Response{
-		Action:  protocol.ActionAccept,
-		Verdict: verdict,
+		Action:  protocol.ActionReplace,
+		Verdict: protocol.VerdictNL,
 		Reason:  res.Reason,
+		Text:    result.Command,
+		Effect:  effect,
 	}
 }
 

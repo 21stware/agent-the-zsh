@@ -126,6 +126,43 @@ _flow_json_field() {
   fi
 }
 
+# _flow_json_string extracts a string field's RAW (still JSON-escaped) value,
+# correctly handling embedded \" and \\ — unlike _flow_json_field, which stops
+# at the first quote. Used for the "text" field (a shell command that may
+# contain quotes). Returns the escaped value; pass it through _flow_json_unescape.
+_flow_json_string() {
+  local json=$1 key=$2
+  local marker="\"$key\":\""
+  local start=${json[(i)$marker]}
+  (( start > ${#json} )) && return 1
+  local i=$(( start + ${#marker} ))
+  local out="" ch
+  while (( i <= ${#json} )); do
+    ch=${json[i]}
+    if [[ $ch == "\\" ]]; then
+      # keep the backslash and the next char verbatim (still escaped)
+      out+=${json[i,i+1]}
+      (( i += 2 ))
+      continue
+    fi
+    [[ $ch == "\"" ]] && break   # unescaped quote ends the value
+    out+=$ch
+    (( i++ ))
+  done
+  print -r -- "$out"
+}
+
+# _flow_json_unescape turns JSON string escapes back into literal characters.
+_flow_json_unescape() {
+  local s=$1
+  s=${s//\\n/$'\n'}
+  s=${s//\\t/$'\t'}
+  s=${s//\\r/$'\r'}
+  s=${s//\\\"/\"}
+  s=${s//\\\\/\\}
+  print -r -- "$s"
+}
+
 # flow-accept-line is the bound widget. It replaces the default accept-line.
 flow-accept-line() {
   # Empty buffer: behave exactly like accept-line.
@@ -144,14 +181,15 @@ flow-accept-line() {
   local action=$(_flow_json_field "$reply" action)
   case $action in
     replace)
-      # Step 3: NL translated to a command. Replace buffer, keep cursor at end,
-      # do NOT accept — the user reviews and presses Enter again (constraint 3).
-      local text=$(_flow_json_field "$reply" text)
+      # NL translated to a command. Replace buffer, keep cursor at end, do NOT
+      # accept — the user reviews and presses Enter again (constraint 3).
+      local text=$(_flow_json_string "$reply" text)
       if [[ -n $text ]]; then
-        BUFFER=$text
-        CURSOR=${#BUFFER}
-        # remember original for Esc Esc undo (wired fully in step 4)
+        # Save the ORIGINAL input BEFORE overwriting, for Esc Esc undo (step 4).
         typeset -g FLOW_LAST_ORIGINAL=$BUFFER
+        typeset -g FLOW_LAST_EFFECT=$(_flow_json_field "$reply" effect)
+        BUFFER=$(_flow_json_unescape "$text")
+        CURSOR=${#BUFFER}
         zle .reset-prompt 2>/dev/null
         return
       fi

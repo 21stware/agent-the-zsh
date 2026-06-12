@@ -19,6 +19,8 @@ import (
 	"syscall"
 
 	"github.com/oboo/terflow/internal/daemon"
+	"github.com/oboo/terflow/internal/llm"
+	"github.com/oboo/terflow/internal/translate"
 )
 
 func main() {
@@ -44,6 +46,23 @@ func main() {
 	log.Printf("flowd: listening on %s", path)
 
 	srv := daemon.New()
+
+	// Enable the NL path (mode A) only when an API key is present. Without it,
+	// the daemon stays in pure-classification mode and NL verdicts degrade to
+	// accept — flow remains a transparent zsh. The key is read from the
+	// environment and never logged.
+	if key := os.Getenv("ANTHROPIC_API_KEY"); key != "" {
+		var opts []llm.Option
+		// Test/advanced hook: redirect the API endpoint (e.g. to a local mock).
+		if base := os.Getenv("FLOW_ANTHROPIC_BASE_URL"); base != "" {
+			opts = append(opts, llm.WithBaseURL(base))
+		}
+		client := llm.New(key, opts...)
+		srv.SetTranslator(translate.New(client, llm.ModelFast))
+		log.Printf("flowd: NL translation enabled (model %s)", llm.ModelFast)
+	} else {
+		log.Printf("flowd: ANTHROPIC_API_KEY unset — NL translation disabled, NL verdicts will accept")
+	}
 
 	// Graceful shutdown: closing the unix listener removes the socket file.
 	sigc := make(chan os.Signal, 1)

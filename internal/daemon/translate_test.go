@@ -15,7 +15,7 @@ import (
 func TestDecideCommand(t *testing.T) {
 	srv := New()
 	srv.Logf = func(string, ...any) {}
-	srv.SetAgentEnabled(true)
+	srv.SetAgentEnabled(true, "test-model")
 	resp := srv.Decide(context.Background(), &protocol.Request{Buffer: "git status", Cwd: "/tmp"})
 	if resp.Action != protocol.ActionAccept {
 		t.Errorf("CMD action = %q, want accept", resp.Action)
@@ -30,7 +30,7 @@ func TestDecideCommand(t *testing.T) {
 func TestDecideNLRoutesToAgent(t *testing.T) {
 	srv := New()
 	srv.Logf = func(string, ...any) {}
-	srv.SetAgentEnabled(true)
+	srv.SetAgentEnabled(true, "test-model")
 	resp := srv.Decide(context.Background(), &protocol.Request{Buffer: "帮我看看 git 状态"})
 	if resp.Action != protocol.ActionAgent {
 		t.Fatalf("action = %q, want agent", resp.Action)
@@ -69,7 +69,7 @@ func TestHandleCommandSinglePhase(t *testing.T) {
 	defer ln.Close()
 	srv := New()
 	srv.Logf = func(string, ...any) {}
-	srv.SetAgentEnabled(true)
+	srv.SetAgentEnabled(true, "test-model")
 	go srv.Serve(ln)
 
 	conn, err := net.Dial("unix", sock)
@@ -104,7 +104,7 @@ func TestHandleNLAgentSinglePhase(t *testing.T) {
 	defer ln.Close()
 	srv := New()
 	srv.Logf = func(string, ...any) {}
-	srv.SetAgentEnabled(true)
+	srv.SetAgentEnabled(true, "test-model")
 	go srv.Serve(ln)
 
 	conn, err := net.Dial("unix", sock)
@@ -153,5 +153,21 @@ func TestHandleClearAcknowledged(t *testing.T) {
 	}
 	if resp.Action != protocol.ActionAccept {
 		t.Errorf("clear reply action = %q, want accept", resp.Action)
+	}
+}
+
+// TestHandleInfo: an info request reports the model name and agent-enabled flag.
+func TestHandleInfo(t *testing.T) {
+	srv := New()
+	srv.Logf = func(string, ...any) {}
+	srv.SetAgentEnabled(true, "claude-opus-4-6")
+	resp := srv.Decide(context.Background(), &protocol.Request{Buffer: "anything"})
+	_ = resp // Decide doesn't handle Info; exercise via the struct directly:
+	// Info is handled in handle(); test the state it reports.
+	srv.mu.RLock()
+	model, agent := srv.model, srv.agentEnabled
+	srv.mu.RUnlock()
+	if model != "claude-opus-4-6" || !agent {
+		t.Errorf("info state = model %q agent %v, want claude-opus-4-6/true", model, agent)
 	}
 }

@@ -70,6 +70,9 @@ type Request struct {
 	// Clear, when true, resets the daemon's NL conversation session and the
 	// daemon replies immediately without classifying. Triggered by `flowclear`.
 	Clear bool `json:"clear,omitempty"`
+	// Info, when true, asks the daemon for status (model name, agent enabled)
+	// without classifying. Used by the widget to populate the prompt.
+	Info bool `json:"info,omitempty"`
 }
 
 // Response is returned by the daemon for a Request.
@@ -89,6 +92,11 @@ type Response struct {
 	// Err carries a daemon-side error string. The widget treats any error as a
 	// reason to fall back to plain accept-line (never brick the terminal).
 	Err string `json:"err,omitempty"`
+	// Model is the configured/discovered model name, returned for an Info
+	// request so the widget can show it in the prompt.
+	Model string `json:"model,omitempty"`
+	// Agent reports whether the NL→agent path is enabled (Info request).
+	Agent bool `json:"agent,omitempty"`
 }
 
 // Effect values for Response.Effect.

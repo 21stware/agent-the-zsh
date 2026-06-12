@@ -11,15 +11,19 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"log"
 	"net"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
+	"time"
 
 	"github.com/oboo/terflow/internal/config"
 	"github.com/oboo/terflow/internal/daemon"
+	"github.com/oboo/terflow/internal/llm"
 )
 
 func main() {
@@ -48,18 +52,31 @@ func main() {
 
 	// Resolve the LLM provider (first-party API or an Anthropic-compatible
 	// proxy: GLM, DeepSeek, a gateway). Config comes from the process env, then
-	// ~/.claude/settings.json. The NL path is enabled only when a credential is
-	// present; otherwise NL verdicts degrade to accept and flow stays a
-	// transparent zsh. Credentials are never logged.
+	// ~/.claude/settings.json.
 	// The daemon does only instant CMD-vs-NL classification. NL is handed to
 	// flow-agent (which does translation/routing/answering itself), so the
-	// daemon needs no LLM client or model — just whether a credential is
-	// configured, to decide if the agent path is available. Credentials are
-	// never logged.
+	// daemon needs no LLM client — just whether a credential is configured, to
+	// decide if the agent path is available. The model name is cosmetic (shown
+	// in the prompt). Credentials are never logged.
 	cfg := config.Load()
 	if cfg.Enabled() {
-		srv.SetAgentEnabled(true)
-		log.Printf("flowd: agent (NL) path enabled — endpoint=%s auth=%s", cfg.BaseURL, cfg.Source)
+		model := cfg.Model
+		if model == "" {
+			model = cfg.FastModel
+		}
+		srv.SetAgentEnabled(true, model)
+		log.Printf("flowd: agent (NL) path enabled — endpoint=%s auth=%s model=%q",
+			cfg.BaseURL, cfg.Source, model)
+		// If no model is configured, discover one in the background (don't block
+		// startup) so the prompt can show a real name.
+		if model == "" {
+			go func() {
+				if m := discoverModel(cfg); m != "" {
+					srv.SetAgentEnabled(true, m)
+					log.Printf("flowd: discovered model %q from %s", m, cfg.BaseURL)
+				}
+			}()
+		}
 	} else {
 		log.Printf("flowd: no LLM credential (ANTHROPIC_AUTH_TOKEN/API_KEY) — NL degrades to running the line as-is")
 	}
@@ -80,4 +97,30 @@ func main() {
 		}
 		log.Printf("flowd: serve stopped: %v", err)
 	}
+}
+
+// discoverModel asks the provider's /v1/models for a model name to display when
+// none is configured. Best-effort and cosmetic; returns "" on any failure.
+// Prefers a capable tier for the display name.
+func discoverModel(cfg *config.Config) string {
+	opts := []llm.Option{llm.WithBaseURL(cfg.BaseURL)}
+	if cfg.AuthToken != "" {
+		opts = append(opts, llm.WithAuthToken(cfg.AuthToken))
+	}
+	client := llm.New(cfg.APIKey, opts...)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	models, err := client.ListModels(ctx)
+	if err != nil || len(models) == 0 {
+		return ""
+	}
+	prefer := []string{"opus", "sonnet", "gpt-5", "gpt-4", "pro", "haiku", "mini", "flash"}
+	for _, p := range prefer {
+		for _, m := range models {
+			if strings.Contains(strings.ToLower(m.ID), p) {
+				return m.ID
+			}
+		}
+	}
+	return models[0].ID
 }

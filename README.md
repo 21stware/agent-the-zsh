@@ -44,63 +44,139 @@ judgment of a single input line: run it as a command, or hand it to the agent.
   s=switch-to-strict. `FLOW_REVIEW` sets the level; `FLOW_AGENT_CMD` points the
   widget at the agent binary.
 
-## Try it (UAT)
+## Install
+
+Requires **Go 1.25+** and **zsh** (with the `zsh/net/socket` module — standard on
+macOS and most Linux zsh builds).
+
+### From source (local machine)
+
+```sh
+make install            # builds, installs to ~/.local, wires ~/.zshrc + autostart
+exec zsh                # or open a new terminal
+```
+
+`make install` puts `flowd` and `flow-agent` in `~/.local/bin`, the widget in
+`~/.local/share/flow`, and adds a small block to your `~/.zshrc` that prepends
+that bin dir to `PATH`, starts `flowd` once, and sources the widget. Override the
+location with `make install PREFIX=/usr/local`.
+
+### From a package (another machine)
+
+```sh
+make dist                                   # on a build machine → dist/flow-<os>-<arch>.tar.gz
+# copy the tarball to the target, then:
+tar xzf flow-<os>-<arch>.tar.gz
+cd flow && ./install.sh                     # PREFIX=/usr/local ./install.sh to change location
+exec zsh
+```
+
+The tarball is self-contained (binaries + widget + `flow-doctor` + installer).
+Build it for the target's OS/arch (`make dist` builds for the host;
+cross-compile with `GOOS=linux GOARCH=amd64 make dist`).
+
+### Configure a provider
+
+flow speaks the Anthropic Messages protocol; the endpoint can be the first-party
+API or any compatible proxy (GLM, DeepSeek, a gateway). Config is read from the
+process env first, then `~/.claude/settings.json`'s `env` block (same convention
+as Claude Code), so an existing Claude Code setup just works. Set **one** of:
+
+```sh
+# compatible proxy (Bearer auth)
+export ANTHROPIC_BASE_URL="https://your-proxy.example"
+export ANTHROPIC_AUTH_TOKEN="sk-..."
+
+# or first-party API (x-api-key)
+export ANTHROPIC_API_KEY="sk-ant-..."
+```
+
+Optional: `ANTHROPIC_MODEL` / `ANTHROPIC_SMALL_FAST_MODEL` pin the model
+(otherwise flow auto-discovers one from the provider's `/v1/models`). Credentials
+are read from the environment and never logged.
+
+Check everything resolved correctly (prints credential fingerprints, never the
+secret, and probes the endpoint):
+
+```sh
+~/.local/share/flow/flow-doctor
+```
+
+### Uninstall
+
+```sh
+make uninstall          # removes binaries, share dir, and the ~/.zshrc block
+pkill flowd             # stop a running daemon
+```
+
+## Using it
+
+Open a zsh prompt and type as usual:
+
+- a **shell command** (`git status`, `ls -la`) runs instantly, unchanged;
+- **natural language** (`这个目录是什么项目`, `delete the build dir`) keeps your
+  typed text on its line and runs the agent inline below it — it translates and
+  runs one command, does multi-step work, or answers, streaming its thinking and
+  output after the prompt;
+- the configured model shows on the right of the prompt (disable with
+  `FLOW_RPROMPT=0`);
+- `flowclear` resets flow state.
+
+Review level (how much the agent confirms before side-effecting actions):
+
+```sh
+export FLOW_REVIEW=focused   # default: ask only on high-risk (rm, git push, …)
+export FLOW_REVIEW=strict    # ask before every side effect
+export FLOW_REVIEW=yolo      # never ask
+```
+
+At an approval prompt: `y` run · `n` reject · `a` allow all (this task) · `s`
+switch to strict.
+
+## Try it without installing (UAT)
 
 ```sh
 ./shell/flow-uat
 ```
 
-Builds flowd, starts a throwaway daemon (using your env or `~/.claude/settings.json`
-provider config), and drops you into an interactive zsh with the widget loaded and
-isolated history. Type a command (runs as usual) or natural language (translated to
-the input line — press Enter to run, Esc Esc to restore your text). `exit` to quit;
-the daemon and socket are torn down automatically.
+Builds the binaries, starts a throwaway daemon (using your env or
+`~/.claude/settings.json`), and drops you into an interactive zsh with the widget
+loaded and isolated history. `exit` tears it all down. Useful for trying changes
+without touching your `~/.zshrc`.
 
 ## Architecture
 
 ```
-zsh widget (thin client)  ──unix socket, JSON line──▶  flowd (Go daemon)
-  intercept Enter                                       classify CMD vs NL
-  CMD: accept-line (0 latency)                          (no network on CMD path)
+zsh widget (thin client) ──unix socket, JSON line──▶ flowd (Go daemon)
+  intercept Enter                                      classify CMD vs NL (offline)
+  CMD: accept-line (0 latency, no network)             NL: action=agent
+  NL: keep typed text, run flow-agent inline below     (no LLM call in the daemon)
   daemon down/slow: degrade to plain accept-line
+
+flow-agent (foreground CLI, has the TTY)
+  self-built Anthropic client (raw HTTP/JSON + SSE, no SDK)
+  tool-use loop: bash / read_file / write_file / edit / grep, in the cwd
+  per-tool permission gate keyed to FLOW_REVIEW
 ```
 
 Design constraints (non-negotiable):
-1. **Command path zero latency** — a CMD verdict accepts immediately; nothing
-   touches the network.
+1. **Command path zero latency** — a CMD verdict accepts immediately; the daemon
+   never touches the network for it.
 2. **Bias to command** — when ambiguous, treat as a command. Misrouting a
-   command to NL is far worse than the reverse.
-3. **Reversible mistakes** — translated NL is written back and waits at
-   end-of-line; never auto-runs a side-effecting command.
-4. **Fail to degrade** — if the daemon is missing/slow/erroring, the widget
-   falls back to plain zsh. It never bricks the terminal.
+   command to NL is worse than the reverse.
+3. **Typed text preserved** — natural language is never silently rewritten into
+   the input line; the agent runs below it.
+4. **Fail to degrade** — if the daemon is missing/slow/erroring, the widget falls
+   back to plain zsh. It never bricks the terminal.
+5. **Side effects are gated** — the agent asks before destructive actions per the
+   review level; reads run optimistically.
 
-## Build & run
-
-```sh
-go build -o flowd ./cmd/flowd
-./flowd &                      # starts the daemon (socket under $TMPDIR/flow-<uid>)
-source shell/flow.zsh          # in your ~/.zshrc, after the daemon is up
-```
-
-Environment:
-- Provider config is resolved from the process env, then `~/.claude/settings.json`'s
-  `env` block (same convention as Claude Code), so an existing setup just works:
-  - `ANTHROPIC_BASE_URL` — endpoint root (default `https://api.anthropic.com`).
-    Point it at any Anthropic-compatible proxy (GLM, DeepSeek, a gateway).
-  - `ANTHROPIC_AUTH_TOKEN` — `Authorization: Bearer` token (compatible proxies).
-  - `ANTHROPIC_API_KEY` — `x-api-key` (first-party API). Read from env, never logged.
-  - `ANTHROPIC_MODEL` / `ANTHROPIC_SMALL_FAST_MODEL` — model names. If unset, flowd
-    auto-discovers a fast model from the provider's `/v1/models`.
-- `FLOW_SOCKET` — override the socket path (client and daemon must agree).
-- `FLOW_TIMEOUT` — widget reply timeout in seconds (default 0.4); on timeout the
-  widget degrades to plain accept-line.
-
-Verified end-to-end against a live Anthropic-compatible proxy: Bearer auth,
-model auto-discovery, NL→command translation, command path stays at 0ms.
-
-## Test
+## Develop & test
 
 ```sh
-go test ./...                  # classifier accuracy + daemon round-trip + latency
+make build     # bin/flowd + bin/flow-agent
+make test      # go test ./...
+make fmt vet   # format + vet
+./shell/flow-uat   # interactive smoke test
 ```
+

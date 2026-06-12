@@ -38,6 +38,10 @@ type Server struct {
 	// configured). When false, NL degrades to accept (run the line as-is).
 	agentEnabled bool
 
+	// model is the configured/discovered model name, surfaced to the widget via
+	// an Info request (shown in the prompt). Cosmetic only.
+	model string
+
 	// Logf is where verdicts and errors go. Defaults to the standard logger.
 	Logf func(format string, args ...any)
 }
@@ -52,10 +56,12 @@ func New() *Server {
 	}
 }
 
-// SetAgentEnabled marks whether the NL→agent path is available.
-func (s *Server) SetAgentEnabled(on bool) {
+// SetAgentEnabled marks whether the NL→agent path is available, and records the
+// model name to surface to the widget (cosmetic).
+func (s *Server) SetAgentEnabled(on bool, model string) {
 	s.mu.Lock()
 	s.agentEnabled = on
+	s.model = model
 	s.mu.Unlock()
 }
 
@@ -97,6 +103,17 @@ func (s *Server) handle(conn net.Conn) {
 		s.Logf("flowd: flowclear")
 		_ = protocol.WriteJSONLine(conn, protocol.Response{
 			Action: protocol.ActionAccept, Reason: "session-cleared",
+		})
+		return
+	}
+
+	// info: report status (model name, agent enabled) without classifying.
+	if req.Info {
+		s.mu.RLock()
+		model, agent := s.model, s.agentEnabled
+		s.mu.RUnlock()
+		_ = protocol.WriteJSONLine(conn, protocol.Response{
+			Action: protocol.ActionAccept, Model: model, Agent: agent,
 		})
 		return
 	}

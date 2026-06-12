@@ -1,4 +1,7 @@
 /flow
 /flowd
+/flow-agent
+/bin/
+/dist/
 *.out
 .DS_Store

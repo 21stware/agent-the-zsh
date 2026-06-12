@@ -27,6 +27,7 @@
 : ${FLOW_REVIEW:=focused}   # strict | focused | yolo — passed to the agent's permission gate
 : ${FLOW_DEBUG:=0}          # 1 = append per-interaction trace to $FLOW_DEBUG_LOG
 : ${FLOW_DEBUG_LOG:="${TMPDIR:-/tmp}/flow-widget.log"}
+: ${FLOW_RPROMPT:=1}        # 1 = show the flow model on the right of the prompt
 
 zmodload zsh/net/socket 2>/dev/null || return 0  # no socket module -> stay plain
 zmodload zsh/system 2>/dev/null || return 0
@@ -288,3 +289,40 @@ _flow_clear_mark() {
 zle -N flow-accept-line
 bindkey '^M' flow-accept-line   # Enter / Return
 bindkey '^J' flow-accept-line   # Ctrl-J / line feed
+
+# _flow_query_info asks the daemon for status (model name, agent enabled) once.
+# Prints the model name on success; empty on any failure.
+_flow_query_info() {
+  local sock=$(_flow_socket_path)
+  [[ -S $sock ]] || return 1
+  zsocket "$sock" 2>/dev/null || return 1
+  local fd=$REPLY
+  print -u $fd -r -- "{\"info\":true,\"proto\":$FLOW_PROTO}" 2>/dev/null || { exec {fd}>&- 2>/dev/null; return 1; }
+  local reply="" chunk
+  if sysread -t 0.5 -i $fd reply 2>/dev/null; then :; fi
+  exec {fd}>&- 2>/dev/null
+  reply=${reply%%$'\n'*}
+  local model=$(_flow_json_field "$reply" model)
+  [[ -n $model ]] && print -r -- "$model"
+}
+
+# _flow_setup_rprompt appends the flow model to RPROMPT (right side), leaving the
+# user's left PROMPT (e.g. an oh-my-zsh theme) untouched. It retries on each
+# prompt until the daemon reports a model (discovery may be async), then stops.
+# Set FLOW_RPROMPT=0 to disable.
+typeset -g FLOW_RPROMPT_DONE=
+_flow_setup_rprompt() {
+  [[ $FLOW_RPROMPT == 1 ]] || return 0
+  [[ -n $FLOW_RPROMPT_DONE ]] && return 0
+  local model=$(_flow_query_info 2>/dev/null)
+  [[ -z $model ]] && return 0
+  FLOW_RPROMPT_DONE=1
+  local seg="%F{244}(${model})%f"
+  if [[ -n $RPROMPT && $RPROMPT != *"$seg"* ]]; then
+    RPROMPT="$RPROMPT $seg"
+  elif [[ -z $RPROMPT ]]; then
+    RPROMPT="$seg"
+  fi
+}
+autoload -Uz add-zsh-hook 2>/dev/null && add-zsh-hook precmd _flow_setup_rprompt
+_flow_setup_rprompt   # try immediately too

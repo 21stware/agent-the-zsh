@@ -11,13 +11,18 @@
 package main
 
 import (
+	"context"
 	"flag"
+	"fmt"
 	"log"
 	"net"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
+	"time"
 
+	"github.com/oboo/terflow/internal/config"
 	"github.com/oboo/terflow/internal/daemon"
 	"github.com/oboo/terflow/internal/llm"
 	"github.com/oboo/terflow/internal/translate"
@@ -47,21 +52,42 @@ func main() {
 
 	srv := daemon.New()
 
-	// Enable the NL path (mode A) only when an API key is present. Without it,
-	// the daemon stays in pure-classification mode and NL verdicts degrade to
-	// accept — flow remains a transparent zsh. The key is read from the
-	// environment and never logged.
-	if key := os.Getenv("ANTHROPIC_API_KEY"); key != "" {
-		var opts []llm.Option
-		// Test/advanced hook: redirect the API endpoint (e.g. to a local mock).
-		if base := os.Getenv("FLOW_ANTHROPIC_BASE_URL"); base != "" {
-			opts = append(opts, llm.WithBaseURL(base))
+	// Resolve the LLM provider (first-party API or an Anthropic-compatible
+	// proxy: GLM, DeepSeek, a gateway). Config comes from the process env, then
+	// ~/.claude/settings.json. The NL path is enabled only when a credential is
+	// present; otherwise NL verdicts degrade to accept and flow stays a
+	// transparent zsh. Credentials are never logged.
+	cfg := config.Load()
+	if cfg.Enabled() {
+		opts := []llm.Option{llm.WithBaseURL(cfg.BaseURL)}
+		if cfg.AuthToken != "" {
+			opts = append(opts, llm.WithAuthToken(cfg.AuthToken))
 		}
-		client := llm.New(key, opts...)
-		srv.SetTranslator(translate.New(client, llm.ModelFast))
-		log.Printf("flowd: NL translation enabled (model %s)", llm.ModelFast)
+		client := llm.New(cfg.APIKey, opts...)
+
+		fastModel := cfg.FastModel
+		if fastModel == "" {
+			fastModel = cfg.Model
+		}
+		if fastModel == "" {
+			// No model configured: discover one from the provider so the same
+			// build works against any compatible endpoint (GLM/DeepSeek/gateway).
+			if m, err := pickFastModel(client); err != nil {
+				log.Printf("flowd: model auto-discovery failed (%v); set ANTHROPIC_SMALL_FAST_MODEL or ANTHROPIC_MODEL", err)
+			} else {
+				fastModel = m
+				log.Printf("flowd: auto-selected model %q from %s/v1/models", fastModel, cfg.BaseURL)
+			}
+		}
+		if fastModel == "" {
+			log.Printf("flowd: no usable model — NL translation disabled")
+		} else {
+			srv.SetTranslator(translate.New(client, fastModel))
+			log.Printf("flowd: NL translation enabled — endpoint=%s auth=%s model=%q",
+				cfg.BaseURL, cfg.Source, fastModel)
+		}
 	} else {
-		log.Printf("flowd: ANTHROPIC_API_KEY unset — NL translation disabled, NL verdicts will accept")
+		log.Printf("flowd: no LLM credential (ANTHROPIC_AUTH_TOKEN/API_KEY) — NL translation disabled, NL verdicts will accept")
 	}
 
 	// Graceful shutdown: closing the unix listener removes the socket file.
@@ -80,4 +106,30 @@ func main() {
 		}
 		log.Printf("flowd: serve stopped: %v", err)
 	}
+}
+
+// pickFastModel discovers a model from the provider when none is configured. It
+// prefers names that signal a small/fast model (the right tier for one-line
+// command translation), and otherwise returns the first listed model. Works
+// across Anthropic-compatible providers (haiku, mini, flash, small, lite…).
+func pickFastModel(client *llm.Client) (string, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	models, err := client.ListModels(ctx)
+	if err != nil {
+		return "", err
+	}
+	if len(models) == 0 {
+		return "", fmt.Errorf("provider returned no models")
+	}
+	// Preference order of substrings signaling a fast/small tier.
+	prefer := []string{"haiku", "mini", "flash", "small", "lite", "fast", "air"}
+	for _, p := range prefer {
+		for _, m := range models {
+			if strings.Contains(strings.ToLower(m.ID), p) {
+				return m.ID, nil
+			}
+		}
+	}
+	return models[0].ID, nil
 }

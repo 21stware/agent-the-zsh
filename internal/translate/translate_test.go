@@ -30,6 +30,7 @@ func TestClassifyEffect(t *testing.T) {
 		{"sed 's/a/b/' file.txt", EffectReadOnly},
 		{"df -h", EffectReadOnly},
 		{"echo hello", EffectReadOnly},
+		{`find . -name '*.go' -type f`, EffectReadOnly}, // pure traversal
 
 		// side effects
 		{"rm -rf build", EffectSideEffect},
@@ -48,8 +49,14 @@ func TestClassifyEffect(t *testing.T) {
 		{"chmod +x script.sh", EffectSideEffect},
 		{"ls && rm file", EffectSideEffect}, // any unsafe in the list
 		{"npm install", EffectSideEffect},
-		{"$EDITOR file", EffectSideEffect},           // dynamic command name
-		{"git config user.name x", EffectSideEffect}, // config can write
+		{"$EDITOR file", EffectSideEffect},                        // dynamic command name
+		{"git config user.name x", EffectSideEffect},              // config can write
+		{`find . -name '*.o' -delete`, EffectSideEffect},          // -delete mutates
+		{`find . -name '*.tmp' -exec rm {} \;`, EffectSideEffect}, // -exec runs a command
+		{`find . -type f -execdir chmod 644 {} +`, EffectSideEffect},
+		{`find . -name x -fls out.txt`, EffectSideEffect},       // writes a file
+		{`fd -e log -x rm`, EffectSideEffect},                   // fd exec
+		{`find . -type f -print0 | xargs rm`, EffectSideEffect}, // xargs runs unknown
 	}
 	for _, c := range cases {
 		got := Classify(c.cmd)

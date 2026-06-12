@@ -128,10 +128,35 @@ func callIsReadOnly(call *syntax.CallExpr) bool {
 	case "sed":
 		// sed is read-only unless -i (in-place) is present.
 		return !hasFlag(call, "-i") && !hasInPlaceSed(call)
+	case "find", "fd":
+		// find/fd are read-only ONLY for traversal/printing. Actions that run
+		// commands or mutate the filesystem make them destructive:
+		//   -delete, -exec, -execdir, -ok, -okdir, -fprint/-fls (write files).
+		return !findHasMutatingAction(call)
+	case "xargs":
+		// xargs runs whatever command follows; we can't see it safely. Caution.
+		return false
 	}
 
 	ro, known := readOnlyCommands[name]
 	return known && ro
+}
+
+// findHasMutatingAction reports whether a find/fd invocation contains an action
+// that runs a command or writes/deletes files.
+func findHasMutatingAction(call *syntax.CallExpr) bool {
+	mutating := map[string]bool{
+		"-delete": true, "-exec": true, "-execdir": true, "-ok": true,
+		"-okdir": true, "-fprint": true, "-fprint0": true, "-fls": true,
+		// fd's execution flags
+		"-x": true, "--exec": true, "-X": true, "--exec-batch": true,
+	}
+	for _, a := range call.Args[1:] {
+		if mutating[litWord(a)] {
+			return true
+		}
+	}
+	return false
 }
 
 // subcommandSafe checks the second word of a subcommand-style tool against an

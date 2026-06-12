@@ -126,6 +126,53 @@ func TestStreamHeaders(t *testing.T) {
 	}
 }
 
+// TestStreamBearerAuth verifies WithAuthToken sends Authorization: Bearer and
+// omits x-api-key — the path used by Anthropic-compatible proxies.
+func TestStreamBearerAuth(t *testing.T) {
+	var hdr http.Header
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hdr = r.Header.Clone()
+		w.Header().Set("content-type", "text/event-stream")
+		_, _ = w.Write([]byte(textStreamSSE))
+	}))
+	defer srv.Close()
+
+	c := New("", WithBaseURL(srv.URL), WithAuthToken("tok-abc"))
+	if _, err := c.Stream(context.Background(), Request{Model: "any-model", MaxTokens: 16,
+		Messages: []Message{{Role: RoleUser, Content: []ContentBlock{TextBlock("hi")}}}}, nil); err != nil {
+		t.Fatalf("Stream: %v", err)
+	}
+	if got := hdr.Get("authorization"); got != "Bearer tok-abc" {
+		t.Errorf("authorization = %q, want %q", got, "Bearer tok-abc")
+	}
+	if hdr.Get("x-api-key") != "" {
+		t.Errorf("x-api-key = %q, want empty when using bearer auth", hdr.Get("x-api-key"))
+	}
+}
+
+// TestListModels parses the /v1/models listing.
+func TestListModels(t *testing.T) {
+	body := `{"data":[{"id":"claude-haiku-4-5-20251001","display_name":"haiku"},{"id":"glm-4","display_name":"glm"}],"object":"list"}`
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/models" {
+			t.Errorf("path = %q, want /v1/models", r.URL.Path)
+		}
+		if r.Header.Get("authorization") != "Bearer t" {
+			t.Errorf("models req authorization = %q", r.Header.Get("authorization"))
+		}
+		_, _ = w.Write([]byte(body))
+	}))
+	defer srv.Close()
+	c := New("", WithBaseURL(srv.URL), WithAuthToken("t"))
+	models, err := c.ListModels(context.Background())
+	if err != nil {
+		t.Fatalf("ListModels: %v", err)
+	}
+	if len(models) != 2 || models[0].ID != "claude-haiku-4-5-20251001" {
+		t.Errorf("models = %+v", models)
+	}
+}
+
 // A tool-use streaming fixture: the model calls bash with {"command":"ls -la"},
 // the input arriving as two input_json_delta fragments.
 const toolStreamSSE = `event: message_start

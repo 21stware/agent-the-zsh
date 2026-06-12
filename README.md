@@ -56,10 +56,20 @@ source shell/flow.zsh          # in your ~/.zshrc, after the daemon is up
 ```
 
 Environment:
-- `ANTHROPIC_API_KEY` — read from env (step 3+); never hardcoded.
+- Provider config is resolved from the process env, then `~/.claude/settings.json`'s
+  `env` block (same convention as Claude Code), so an existing setup just works:
+  - `ANTHROPIC_BASE_URL` — endpoint root (default `https://api.anthropic.com`).
+    Point it at any Anthropic-compatible proxy (GLM, DeepSeek, a gateway).
+  - `ANTHROPIC_AUTH_TOKEN` — `Authorization: Bearer` token (compatible proxies).
+  - `ANTHROPIC_API_KEY` — `x-api-key` (first-party API). Read from env, never logged.
+  - `ANTHROPIC_MODEL` / `ANTHROPIC_SMALL_FAST_MODEL` — model names. If unset, flowd
+    auto-discovers a fast model from the provider's `/v1/models`.
 - `FLOW_SOCKET` — override the socket path (client and daemon must agree).
 - `FLOW_TIMEOUT` — widget reply timeout in seconds (default 0.4); on timeout the
   widget degrades to plain accept-line.
+
+Verified end-to-end against a live Anthropic-compatible proxy: Bearer auth,
+model auto-discovery, NL→command translation, command path stays at 0ms.
 
 ## Test
 

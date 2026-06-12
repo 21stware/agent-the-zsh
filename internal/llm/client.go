@@ -7,12 +7,15 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 	"time"
 )
 
-// Client is a self-built Anthropic Messages API client.
+// Client is a self-built Anthropic Messages API client. It targets the
+// first-party API or any Anthropic-compatible proxy (GLM, DeepSeek, gateways).
 type Client struct {
-	apiKey     string
+	apiKey     string // x-api-key auth (first-party)
+	authToken  string // Authorization: Bearer auth (compatible proxies)
 	baseURL    string
 	httpClient *http.Client
 }
@@ -21,21 +24,30 @@ type Client struct {
 type Option func(*Client)
 
 // WithBaseURL overrides the API endpoint (used by tests to point at a fixture
-// server).
-func WithBaseURL(u string) Option { return func(c *Client) { c.baseURL = u } }
+// server, and to target compatible proxies).
+func WithBaseURL(u string) Option {
+	return func(c *Client) {
+		if u != "" {
+			c.baseURL = strings.TrimRight(u, "/")
+		}
+	}
+}
+
+// WithAuthToken sets Authorization: Bearer auth, used by Anthropic-compatible
+// proxies. When set, it takes precedence over x-api-key.
+func WithAuthToken(t string) Option { return func(c *Client) { c.authToken = t } }
 
 // WithHTTPClient overrides the underlying http.Client.
 func WithHTTPClient(h *http.Client) Option { return func(c *Client) { c.httpClient = h } }
 
-// New constructs a Client. apiKey must be non-empty; callers read it from
-// ANTHROPIC_API_KEY and must not log it.
+// New constructs a Client. apiKey may be empty when WithAuthToken is used. The
+// credential is read from config by the caller and must not be logged.
 func New(apiKey string, opts ...Option) *Client {
 	c := &Client{
 		apiKey:  apiKey,
 		baseURL: defaultBaseURL,
 		// No overall timeout here: streaming responses are long-lived and the
-		// caller controls cancellation via context. A dial/idle-safe transport
-		// is the default http.Transport's job.
+		// caller controls cancellation via context.
 		httpClient: &http.Client{},
 	}
 	for _, o := range opts {
@@ -62,8 +74,14 @@ func (c *Client) Stream(ctx context.Context, req Request, onEvent func(StreamEve
 	}
 	httpReq.Header.Set("content-type", "application/json")
 	httpReq.Header.Set("anthropic-version", anthropicVersion)
-	httpReq.Header.Set("x-api-key", c.apiKey)
 	httpReq.Header.Set("accept", "text/event-stream")
+	// Auth: Bearer token (compatible proxies) takes precedence; otherwise
+	// x-api-key (first-party API). The credential is never logged.
+	if c.authToken != "" {
+		httpReq.Header.Set("authorization", "Bearer "+c.authToken)
+	} else {
+		httpReq.Header.Set("x-api-key", c.apiKey)
+	}
 
 	resp, err := c.httpClient.Do(httpReq)
 	if err != nil {
@@ -118,3 +136,40 @@ func parseAPIError(resp *http.Response) error {
 // streamTimeout is a sane upper bound a caller can apply via context for a
 // single mode-A translation (which should be quick). Exposed for callers.
 const StreamTimeout = 30 * time.Second
+
+// Model is one entry from the provider's /v1/models listing.
+type Model struct {
+	ID          string `json:"id"`
+	DisplayName string `json:"display_name"`
+}
+
+// ListModels queries GET /v1/models. Anthropic and compatible proxies expose
+// this; flowd uses it to auto-select a model when none is configured, so the
+// same build works against GLM/DeepSeek/gateway endpoints without manual setup.
+func (c *Client) ListModels(ctx context.Context) ([]Model, error) {
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+"/v1/models", nil)
+	if err != nil {
+		return nil, err
+	}
+	httpReq.Header.Set("anthropic-version", anthropicVersion)
+	if c.authToken != "" {
+		httpReq.Header.Set("authorization", "Bearer "+c.authToken)
+	} else {
+		httpReq.Header.Set("x-api-key", c.apiKey)
+	}
+	resp, err := c.httpClient.Do(httpReq)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, parseAPIError(resp)
+	}
+	var doc struct {
+		Data []Model `json:"data"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&doc); err != nil {
+		return nil, err
+	}
+	return doc.Data, nil
+}

@@ -171,6 +171,14 @@ func (s *Server) translateReply(ctx context.Context, tr Translator, req *protoco
 			Reason: reason + "+untranslatable",
 		}
 	}
+	if result.Agent {
+		// Route to mode B: the widget hands the original NL task to flow-agent.
+		s.Logf("flowd: routed to agent: %q", req.Buffer)
+		return protocol.Response{
+			Action: protocol.ActionAgent, Verdict: protocol.VerdictNL,
+			Reason: reason + "+agent", Text: req.Buffer,
+		}
+	}
 
 	effect := protocol.EffectReadOnly
 	if result.Effect == translate.EffectSideEffect {

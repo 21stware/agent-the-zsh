@@ -31,7 +31,17 @@ judgment and rewriting of a single input line.
   translations (rm, mv, git push…) show a `⚠` tag below the line; read-only
   ones show `✓`. Per the "mark, don't block" choice, Enter still runs the line —
   the tag is a visual cue, not a gate. `command_not_found` is left as plain zsh.
-- Mode B — self-built agent loop (bash/read/write/grep + per-tool permission). _next_
+- Mode B — self-built agent loop ✅
+  Natural language auto-routes three ways from one input: a real command runs
+  instantly; a one-command request is translated (mode A); a multi-step task is
+  routed to the agent (mode B) — the model itself decides A vs B. The agent
+  (`cmd/flow-agent`, foreground TTY) runs a tool-use loop (bash/read_file/
+  write_file/edit/grep) in the current directory, with a per-tool-call
+  permission gate: reads are optimistic, and side-effecting calls are gated by a
+  review level (strict / focused / yolo; default focused asks only on high-risk:
+  rm, git push, sudo, writes outside the tree, …). At an approval prompt:
+  y=run, n=reject, a=allow-all-this-task, s=switch-to-strict. `FLOW_REVIEW` sets
+  the default level; `FLOW_AGENT_CMD` points the widget at the agent binary.
 
 ## Try it (UAT)
 

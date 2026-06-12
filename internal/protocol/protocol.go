@@ -14,6 +14,7 @@ package protocol
 
 import (
 	"bufio"
+	"bytes"
 	"encoding/json"
 	"io"
 )
@@ -38,6 +39,11 @@ const (
 	// timeout. This keeps the command path bounded by the short first-phase
 	// timeout while letting NL translation take seconds.
 	ActionPending Action = "pending"
+
+	// ActionAgent routes the request to mode B (the agent). The widget hands the
+	// original NL task off to the foreground flow-agent, which takes over the
+	// terminal. Text carries the task to run.
+	ActionAgent Action = "agent"
 )
 
 // Verdict is the classifier's decision, surfaced for logging/telemetry and for
@@ -91,14 +97,19 @@ const (
 // CurrentProto is the protocol version this build speaks.
 const CurrentProto = 1
 
-// WriteJSONLine encodes v as a single JSON object followed by '\n'.
+// WriteJSONLine encodes v as a single JSON object followed by '\n'. HTML
+// escaping is disabled so shell metacharacters in command text (`<`, `>`, `&`)
+// are emitted literally instead of as </>/& — the zsh widget's
+// JSON reader doesn't decode \uXXXX, and a translated command must round-trip
+// verbatim.
 func WriteJSONLine(w io.Writer, v any) error {
-	b, err := json.Marshal(v)
-	if err != nil {
+	var buf bytes.Buffer
+	enc := json.NewEncoder(&buf)
+	enc.SetEscapeHTML(false)
+	if err := enc.Encode(v); err != nil { // Encode appends a trailing '\n'
 		return err
 	}
-	b = append(b, '\n')
-	_, err = w.Write(b)
+	_, err := w.Write(buf.Bytes())
 	return err
 }
 

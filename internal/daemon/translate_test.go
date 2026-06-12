@@ -226,3 +226,16 @@ func TestDecideNLUntranslatableDegrades(t *testing.T) {
 		t.Errorf("action = %q, want accept (degrade when untranslatable)", resp.Action)
 	}
 }
+
+func TestDecideNLRoutesToAgent(t *testing.T) {
+	srv := New()
+	srv.Logf = func(string, ...any) {}
+	srv.SetTranslator(&fakeTranslator{result: &translate.Result{Agent: true}})
+	resp := srv.Decide(context.Background(), &protocol.Request{Buffer: "refactor the auth module and run tests"})
+	if resp.Action != protocol.ActionAgent {
+		t.Fatalf("action = %q, want agent", resp.Action)
+	}
+	if resp.Text != "refactor the auth module and run tests" {
+		t.Errorf("agent text = %q, want the original task", resp.Text)
+	}
+}

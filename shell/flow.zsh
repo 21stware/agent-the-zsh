@@ -244,6 +244,22 @@ flow-accept-line() {
 _flow_apply_reply() {
   local action=$1 reply=$2
   case $action in
+    agent)
+      # Route to mode B. Replace the line with a flow-agent invocation and run
+      # it: flow-agent takes over the foreground terminal (full TTY, real cwd),
+      # can prompt for approval, and returns to the prompt when done. We quote
+      # the task so it is a single argument. The original NL is saved for Esc Esc.
+      local task=$(_flow_json_unescape "$(_flow_json_string "$reply" text)")
+      [[ -z $task ]] && task=$BUFFER
+      typeset -g FLOW_LAST_ORIGINAL=$BUFFER
+      _flow_clear_mark
+      # Use the configured launcher; default to `flow-agent` on PATH.
+      local q=${task//\'/\'\\\'\'}   # single-quote-escape the task
+      BUFFER="${FLOW_AGENT_CMD:-flow-agent} '$q'"
+      CURSOR=${#BUFFER}
+      zle .reset-prompt 2>/dev/null
+      zle .accept-line
+      ;;
     replace)
       # NL translated to a command. Replace buffer, keep cursor at end, do NOT
       # accept — the user reviews and presses Enter again (constraint 3).

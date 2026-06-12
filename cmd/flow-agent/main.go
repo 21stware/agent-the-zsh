@@ -20,6 +20,7 @@ import (
 	"os/signal"
 	"strings"
 	"syscall"
+	"time"
 
 	"github.com/oboo/terflow/internal/agent"
 	"github.com/oboo/terflow/internal/config"
@@ -63,20 +64,26 @@ func main() {
 		fmt.Fprintln(os.Stderr, "flow-agent: no LLM credential configured (ANTHROPIC_AUTH_TOKEN/API_KEY). See flow-doctor.")
 		os.Exit(1)
 	}
-	model := cfg.Model // capable model for agent work
-	if model == "" {
-		model = cfg.FastModel
-	}
-	if model == "" {
-		fmt.Fprintln(os.Stderr, "flow-agent: no model configured; set ANTHROPIC_MODEL.")
-		os.Exit(1)
-	}
-
 	opts := []llm.Option{llm.WithBaseURL(cfg.BaseURL)}
 	if cfg.AuthToken != "" {
 		opts = append(opts, llm.WithAuthToken(cfg.AuthToken))
 	}
 	client := llm.New(cfg.APIKey, opts...)
+
+	model := cfg.Model // prefer the capable model for agent work
+	if model == "" {
+		model = cfg.FastModel
+	}
+	if model == "" {
+		// No model configured: discover one from the provider, preferring a
+		// capable tier (opus/sonnet) since agent work is correctness-sensitive.
+		m, err := pickCapableModel(client)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "flow-agent: no model configured and discovery failed (%v); set ANTHROPIC_MODEL.\n", err)
+			os.Exit(1)
+		}
+		model = m
+	}
 
 	cwd, _ := os.Getwd()
 	level := agent.ParseReviewLevel(os.Getenv("FLOW_REVIEW"))
@@ -202,4 +209,27 @@ func dimIndent(s string) string {
 		lines[i] = cDim + "    " + ln + cReset
 	}
 	return strings.Join(lines, "\n")
+}
+
+// pickCapableModel discovers a model when none is configured, preferring a
+// capable tier (opus > sonnet) for agent work; falls back to any model.
+func pickCapableModel(client *llm.Client) (string, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	models, err := client.ListModels(ctx)
+	if err != nil {
+		return "", err
+	}
+	if len(models) == 0 {
+		return "", fmt.Errorf("provider returned no models")
+	}
+	prefer := []string{"opus", "sonnet", "gpt-5", "gpt-4", "max", "pro"}
+	for _, p := range prefer {
+		for _, m := range models {
+			if strings.Contains(strings.ToLower(m.ID), p) {
+				return m.ID, nil
+			}
+		}
+	}
+	return models[0].ID, nil
 }

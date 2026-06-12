@@ -175,3 +175,18 @@ func TestTranslateStripsFence(t *testing.T) {
 		t.Errorf("command = %q, want fenced content stripped", res.Command)
 	}
 }
+
+func TestTranslateRoutesToAgent(t *testing.T) {
+	srv := fixtureServer(t, AgentSentinel)
+	tr := New(llm.New("k", llm.WithBaseURL(srv.URL)), "")
+	res, err := tr.Translate(context.Background(), "fix all the failing tests", Context{}, nil)
+	if err != nil {
+		t.Fatalf("Translate: %v", err)
+	}
+	if !res.Agent {
+		t.Errorf("expected Agent=true, got command=%q untranslatable=%v", res.Command, res.Untranslatable)
+	}
+	if res.Command != "" {
+		t.Errorf("agent route should have empty command, got %q", res.Command)
+	}
+}

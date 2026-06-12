@@ -12,22 +12,38 @@ import (
 	"github.com/oboo/terflow/internal/llm"
 )
 
-// systemPrompt instructs the model to emit exactly one shell command and nothing
-// else. The constraints matter: any prose, fences, or explanation would be
-// written verbatim into the user's buffer.
-const systemPrompt = `You translate a natural-language request into a single shell command for an interactive zsh session.
+// systemPrompt instructs the model to either emit exactly one shell command
+// (mode A) or, when the request needs multi-step hands-on work, route to the
+// agent (mode B) by emitting a single sentinel line. The constraints matter:
+// any prose, fences, or explanation would be written verbatim into the buffer.
+const systemPrompt = `You route a natural-language request for an interactive zsh session.
 
-Rules:
-- Output ONLY the command. No explanation, no markdown, no code fences, no leading "$".
-- Exactly one command line. You may use pipes, &&, and ; but keep it to one logical line.
-- Prefer common, portable POSIX/coreutils tools and widely-installed CLIs (git, docker, rg, find, etc.).
-- Use the provided current directory and recent history as context for relative paths and intent.
-- If the request is ambiguous, choose the most likely single interpretation a developer would mean.
-- Do NOT wrap the command in quotes. Do NOT add comments.
-- If the request cannot be expressed as a shell command, output exactly: # cannot translate`
+Decide between two outcomes and output ONLY one of them, nothing else:
+
+1. If the request can be accomplished with a SINGLE shell command, output ONLY that command.
+   - No explanation, no markdown, no code fences, no leading "$".
+   - One command line; pipes, &&, ; are fine but keep it one logical line.
+   - Do NOT wrap in quotes or add comments.
+
+2. If the request needs MULTIPLE steps, exploration, reading/editing files, or hands-on work that one command cannot do, output EXACTLY this single line and nothing else:
+   ## AGENT
+
+Examples:
+- "list go files" -> find . -name '*.go'
+- "what's using port 8080" -> lsof -i :8080
+- "fix all the failing tests" -> ## AGENT
+- "refactor this module to use channels" -> ## AGENT
+- "add error handling to main.go and run the build" -> ## AGENT
+
+If the request is a pure question that is neither a command nor a task (e.g. "what is SQL"), output exactly: # cannot translate
+
+Use the provided current directory and recent history as context.`
 
 // CannotTranslate is the sentinel the model emits when no command fits.
 const CannotTranslate = "# cannot translate"
+
+// AgentSentinel is the line the model emits to route a request to mode B.
+const AgentSentinel = "## AGENT"
 
 // Context carries the situational inputs for a translation.
 type Context struct {
@@ -54,6 +70,7 @@ func New(client *llm.Client, model string) *Translator {
 type Result struct {
 	Command        string // the translated command (trimmed), or "" if untranslatable
 	Untranslatable bool
+	Agent          bool   // true when the request should route to mode B (the agent)
 	Effect         Effect // side-effect classification of the command
 }
 
@@ -83,6 +100,9 @@ func (t *Translator) Translate(ctx context.Context, nl string, tc Context, onDel
 	cmd := sanitize(resp.Text())
 	if cmd == "" || strings.HasPrefix(cmd, CannotTranslate) {
 		return &Result{Untranslatable: true}, nil
+	}
+	if cmd == AgentSentinel || strings.HasPrefix(cmd, AgentSentinel) {
+		return &Result{Agent: true}, nil
 	}
 	return &Result{Command: cmd, Effect: Classify(cmd)}, nil
 }

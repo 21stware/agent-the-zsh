@@ -61,6 +61,42 @@ func TestLoadDefaultsAndDisabled(t *testing.T) {
 	}
 }
 
+// TestStaleEnvTokenDoesNotShadowSettingsProvider is the regression guard for the
+// real UAT failure: settings.json configures a full provider (BASE_URL +
+// AUTH_TOKEN), but the shell exports a *different*, stale ANTHROPIC_AUTH_TOKEN
+// (same var name) for some other service, with no BASE_URL in env. Plain
+// env-first precedence picked the stale env token and 401'd against the proxy.
+// Endpoint-aware resolution must keep the settings.json token with its endpoint.
+func TestStaleEnvTokenDoesNotShadowSettingsProvider(t *testing.T) {
+	dir := t.TempDir()
+	claudeDir := filepath.Join(dir, ".claude")
+	if err := os.MkdirAll(claudeDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	settings := `{"env":{
+		"ANTHROPIC_BASE_URL":"https://worldbase.example",
+		"ANTHROPIC_AUTH_TOKEN":"sk-good-proxy-token"
+	}}`
+	if err := os.WriteFile(filepath.Join(claudeDir, "settings.json"), []byte(settings), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("HOME", dir)
+	// No BASE_URL in env; a stale token from another service is exported.
+	os.Unsetenv("ANTHROPIC_BASE_URL")
+	os.Unsetenv("ANTHROPIC_API_KEY")
+	os.Unsetenv("ANTHROPIC_MODEL")
+	os.Unsetenv("ANTHROPIC_SMALL_FAST_MODEL")
+	t.Setenv("ANTHROPIC_AUTH_TOKEN", "1a1322-stale-foreign-token-3kOn")
+
+	c := Load()
+	if c.BaseURL != "https://worldbase.example" {
+		t.Errorf("BaseURL = %q, want proxy from settings", c.BaseURL)
+	}
+	if c.AuthToken != "sk-good-proxy-token" {
+		t.Errorf("AuthToken = %q, want the settings.json token (its endpoint's source)", c.AuthToken)
+	}
+}
+
 func TestLoadAPIKeyAuth(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("HOME", dir)

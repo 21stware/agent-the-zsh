@@ -56,6 +56,18 @@ const (
 func Load() *Config {
 	settings := loadSettingsEnv()
 
+	// getFrom returns a key's value from a specific source ("env" or
+	// "settings.json"), or "" if absent there.
+	getFrom := func(key, src string) string {
+		switch src {
+		case "env":
+			return os.Getenv(key)
+		case "settings.json":
+			return settings[key]
+		}
+		return ""
+	}
+	// get resolves a key with env-first precedence, returning its source.
 	get := func(key string) (val, src string) {
 		if v := os.Getenv(key); v != "" {
 			return v, "env"
@@ -74,30 +86,50 @@ func Load() *Config {
 		baseSrc = "default"
 	}
 
-	var tokSrc, keySrc string
-	c.AuthToken, tokSrc = get(envAuthToken)
-	c.APIKey, keySrc = get(envAPIKey)
 	c.Model, _ = get(envModel)
 	c.FastModel, _ = get(envFastModel)
 
-	// Auth precedence. AUTH_TOKEN (Bearer) and API_KEY (x-api-key) are mutually
-	// exclusive at the wire level, so when both resolve we must pick one. The
-	// trap we're avoiding: a custom endpoint (proxy) configured in
-	// settings.json, plus a stray ANTHROPIC_API_KEY left in the shell env from
-	// some other tool. That key does not belong to the proxy and yields 401.
+	// Auth resolution is endpoint-aware: a credential belongs to the endpoint
+	// from the SAME source. When the base URL comes from a real source (env or
+	// settings.json — i.e. an explicitly chosen provider), look for the auth
+	// credential in that source first, and only fall back to the other source if
+	// that source has none.
 	//
-	// Rule: if both are present, prefer the credential that comes from the SAME
-	// source as the (non-default) base URL — they belong together. Otherwise
-	// prefer AUTH_TOKEN (the proxy/Bearer convention). We null out the loser so
-	// the client sends exactly one auth header.
+	// This avoids the trap that bit a real user: ANTHROPIC_BASE_URL +
+	// ANTHROPIC_AUTH_TOKEN configured together in ~/.claude/settings.json for a
+	// proxy, but a *different*, stale ANTHROPIC_AUTH_TOKEN exported in the shell
+	// for some other service. Plain env-first precedence would pick the stale
+	// env token and 401 against the proxy. Endpoint-aware resolution keeps the
+	// token with its endpoint.
+	var tokSrc, keySrc string
+	if baseSrc == "env" || baseSrc == "settings.json" {
+		// Prefer the base URL's own source for the credential.
+		if v := getFrom(envAuthToken, baseSrc); v != "" {
+			c.AuthToken, tokSrc = v, baseSrc
+		} else if v := getFrom(envAPIKey, baseSrc); v != "" {
+			c.APIKey, keySrc = v, baseSrc
+		} else {
+			// That source has no credential; fall back to normal resolution.
+			c.AuthToken, tokSrc = get(envAuthToken)
+			c.APIKey, keySrc = get(envAPIKey)
+		}
+	} else {
+		// Default endpoint: normal env-first resolution.
+		c.AuthToken, tokSrc = get(envAuthToken)
+		c.APIKey, keySrc = get(envAPIKey)
+	}
+
+	// AUTH_TOKEN (Bearer) and API_KEY (x-api-key) are mutually exclusive on the
+	// wire. If both still resolved, prefer the one matching the base URL's
+	// source, else Bearer; null out the loser so exactly one header is sent.
 	if c.AuthToken != "" && c.APIKey != "" {
 		switch {
 		case baseSrc != "default" && keySrc == baseSrc && tokSrc != baseSrc:
-			c.AuthToken = "" // key matches the endpoint's source; drop the stray token
+			c.AuthToken = ""
 		case baseSrc != "default" && tokSrc == baseSrc && keySrc != baseSrc:
-			c.APIKey = "" // token matches the endpoint's source; drop the stray key
+			c.APIKey = ""
 		default:
-			c.APIKey = "" // tie / no signal: Bearer wins
+			c.APIKey = ""
 		}
 	}
 

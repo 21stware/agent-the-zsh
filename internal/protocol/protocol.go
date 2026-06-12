@@ -1,0 +1,119 @@
+// Package protocol defines the wire format between the flow zsh widget (thin
+// client) and the flowd daemon. The transport is a unix domain socket; the
+// encoding is one JSON object per line ("json line" / JSONL), request and
+// response.
+//
+// Design notes tied to the project constraints:
+//   - The request never leaves the machine. The daemon must not put user input
+//     on the network for the CMD path (constraint 1 & "command path never goes
+//     to network").
+//   - The response is intentionally small and synchronous for step 2. In step 3
+//     the daemon will stream translation chunks; that will be a separate
+//     response variant, not a change to this request shape.
+package protocol
+
+import (
+	"bufio"
+	"encoding/json"
+	"io"
+)
+
+// Action is what the widget should do with the current input line.
+type Action string
+
+const (
+	// ActionAccept: run the buffer as-is (accept-line). This is the zero-latency
+	// command path and, in step 2, also the fallback for NL (translation lands
+	// in step 3).
+	ActionAccept Action = "accept"
+
+	// ActionReplace: replace the buffer with Text and stop at end-of-line for the
+	// user to confirm. Reserved for step 3 (mode A translation). Defined here so
+	// the widget can be written against the final protocol now.
+	ActionReplace Action = "replace"
+)
+
+// Verdict is the classifier's decision, surfaced for logging/telemetry and for
+// the widget to optionally annotate. It does not by itself dictate Action.
+type Verdict string
+
+const (
+	VerdictCMD Verdict = "CMD"
+	VerdictNL  Verdict = "NL"
+)
+
+// Request is sent by the widget on each accept (Enter).
+type Request struct {
+	// Buffer is the raw current input line (ZLE $BUFFER).
+	Buffer string `json:"buffer"`
+	// Cwd is the widget's current working directory, for context and for binding
+	// any later command execution to the right directory.
+	Cwd string `json:"cwd"`
+	// History is the most recent shell history lines (oldest first), bounded by
+	// the client. Used as context by the classifier/translator. Never required.
+	History []string `json:"history,omitempty"`
+	// Proto lets the daemon reject mismatched clients. Bumped on breaking changes.
+	Proto int `json:"proto"`
+}
+
+// Response is returned by the daemon for a Request.
+type Response struct {
+	// Action tells the widget what to do. In step 2 this is always "accept".
+	Action Action `json:"action"`
+	// Verdict is the classification result (CMD/NL) for logging/annotation.
+	Verdict Verdict `json:"verdict"`
+	// Reason is the human-readable classifier reason, for debugging.
+	Reason string `json:"reason,omitempty"`
+	// Text is the replacement buffer when Action == "replace" (step 3).
+	Text string `json:"text,omitempty"`
+	// Err carries a daemon-side error string. The widget treats any error as a
+	// reason to fall back to plain accept-line (never brick the terminal).
+	Err string `json:"err,omitempty"`
+}
+
+// CurrentProto is the protocol version this build speaks.
+const CurrentProto = 1
+
+// WriteJSONLine encodes v as a single JSON object followed by '\n'.
+func WriteJSONLine(w io.Writer, v any) error {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+	b = append(b, '\n')
+	_, err = w.Write(b)
+	return err
+}
+
+// ReadRequest reads and decodes one JSONL request from r.
+func ReadRequest(r *bufio.Reader) (*Request, error) {
+	line, err := r.ReadBytes('\n')
+	if err != nil && len(line) == 0 {
+		return nil, err
+	}
+	var req Request
+	if e := json.Unmarshal(trimNewline(line), &req); e != nil {
+		return nil, e
+	}
+	return &req, nil
+}
+
+// ReadResponse reads and decodes one JSONL response from r.
+func ReadResponse(r *bufio.Reader) (*Response, error) {
+	line, err := r.ReadBytes('\n')
+	if err != nil && len(line) == 0 {
+		return nil, err
+	}
+	var resp Response
+	if e := json.Unmarshal(trimNewline(line), &resp); e != nil {
+		return nil, e
+	}
+	return &resp, nil
+}
+
+func trimNewline(b []byte) []byte {
+	for len(b) > 0 && (b[len(b)-1] == '\n' || b[len(b)-1] == '\r') {
+		b = b[:len(b)-1]
+	}
+	return b
+}

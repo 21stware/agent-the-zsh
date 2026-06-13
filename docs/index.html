@@ -117,6 +117,38 @@
 </section>
 
 <section>
+  <h2>Conversation per window</h2>
+  <p style="color:var(--dim)">Each terminal window is one continuous
+    conversation. Ask, get an answer, ask a follow-up — the agent remembers the
+    earlier turns in that window automatically. Open a new window for a clean
+    slate.</p>
+  <pre class="term"><span class="p">~/proj</span> 一加一等于几？
+<span class="c">  flow · dir ~/proj · review focused</span>
+  2
+
+<span class="p">~/proj</span> 然后平方
+<span class="c">  flow · dir ~/proj · review focused</span>
+  4  <span class="c"># ← remembers the 2 from the previous turn</span></pre>
+  <div class="grid">
+    <div class="card"><h3><code>flowtmp</code></h3>
+      <p>Make a fresh temp dir and <code>cd</code> into it — a scratch space for
+      the current window.</p></div>
+    <div class="card"><h3><code>flowrsm</code></h3>
+      <p>Continue a previous window's conversation here. Shows an arrow-key
+      picker (each row: directory + that conversation's last message); pick one
+      and it carries on in this window. <code>flowrsm &lt;id&gt;</code> resumes a
+      specific one.</p></div>
+    <div class="card"><h3><code>flowclear</code></h3>
+      <p>Start this window's conversation over (clears its transcript). Use
+      <code>FLOW_FRESH=1</code> to make a single turn ignore history.</p></div>
+  </div>
+  <p style="color:var(--dim)">Transcripts live under
+    <code>$TMPDIR/flow-&lt;uid&gt;/sessions/</code> (owner-only, cleared on
+    reboot), keyed by an exported <code>FLOW_SESSION_ID</code> that survives
+    <code>exec zsh</code>.</p>
+</section>
+
+<section>
   <h2>Configure a provider</h2>
   <p style="color:var(--dim)">Set one of these in your shell or
     <code>~/.claude/settings.json</code> (same convention as Claude Code, so an

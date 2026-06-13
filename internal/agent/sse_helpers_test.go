@@ -1,9 +1,13 @@
 package agent
 
 import (
+	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"testing"
+
+	"github.com/21stware/agent-the-zsh/internal/llm"
 )
 
 // newSSEServer starts a test server whose /v1/messages replies with the SSE
@@ -12,6 +16,24 @@ func newSSEServer(t *testing.T, next func() string) string {
 	t.Helper()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_, _ = http.MaxBytesReader(w, r.Body, 1<<20).Read(make([]byte, 0))
+		w.Header().Set("content-type", "text/event-stream")
+		_, _ = w.Write([]byte(next()))
+	}))
+	t.Cleanup(srv.Close)
+	return srv.URL
+}
+
+// newSSEServerReq is like newSSEServer but decodes each POST body into an
+// llm.Request and passes it to onReq before replying — letting a test assert on
+// the exact message list the loop sent.
+func newSSEServerReq(t *testing.T, onReq func(llm.Request), next func() string) string {
+	t.Helper()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(http.MaxBytesReader(w, r.Body, 1<<20))
+		var req llm.Request
+		if err := json.Unmarshal(body, &req); err == nil && onReq != nil {
+			onReq(req)
+		}
 		w.Header().Set("content-type", "text/event-stream")
 		_, _ = w.Write([]byte(next()))
 	}))

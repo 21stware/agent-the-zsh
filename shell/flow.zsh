@@ -35,6 +35,84 @@ zmodload zsh/net/socket 2>/dev/null || return 0  # no socket module -> stay plai
 zmodload zsh/system 2>/dev/null || return 0
 zmodload zsh/datetime 2>/dev/null || return 0    # for EPOCHREALTIME read deadline
 
+# --- session identity -------------------------------------------------------
+# A flow session is one shell. FLOW_SESSION_ID keys the conversation transcript
+# (see internal/session). It is generated once and exported so it survives
+# `exec zsh`; a new terminal/tab gets a fresh id (a new conversation). The
+# zshrc flow block sets it first when wired; this is the fallback when flow.zsh
+# is sourced directly.
+_flow_gen_session_id() {
+  if command -v uuidgen >/dev/null 2>&1; then
+    uuidgen | tr 'A-Z' 'a-z'
+  else
+    print -r -- "${EPOCHSECONDS:-$(date +%s)}-$$-${RANDOM}${RANDOM}"
+  fi
+}
+: ${FLOW_SESSION_ID:=$(_flow_gen_session_id)}
+export FLOW_SESSION_ID
+
+# _flow_session_file resolves the JSONL transcript path for this shell, matching
+# session.Path() in Go: $XDG_RUNTIME_DIR/flow/sessions or $TMPDIR/flow-<uid>/sessions.
+_flow_session_file() {
+  [[ -n $FLOW_SESSION_ID ]] || return 1
+  local base
+  if [[ -n $XDG_RUNTIME_DIR ]]; then
+    base="$XDG_RUNTIME_DIR/flow/sessions"
+  else
+    base="${TMPDIR:-/tmp}/flow-${UID}/sessions"
+  fi
+  print -r -- "$base/${FLOW_SESSION_ID}.jsonl"
+}
+
+# flowtmp: make a fresh temp dir and cd into it. Defined as a function (not a
+# child process) because it must change THIS shell's cwd.
+flowtmp() {
+  local d
+  d=$(mktemp -d "${TMPDIR:-/tmp}/flow-tmp.XXXXXX") || {
+    print -u2 -r -- "flowtmp: mktemp failed"
+    return 1
+  }
+  cd "$d" || return 1
+  print -r -- "flow: cwd -> $d"
+}
+
+# _flow_sessions_dir resolves the sessions directory (matches session.Path() in Go).
+_flow_sessions_dir() {
+  if [[ -n $XDG_RUNTIME_DIR ]]; then
+    print -r -- "$XDG_RUNTIME_DIR/flow/sessions"
+  else
+    print -r -- "${TMPDIR:-/tmp}/flow-${UID}/sessions"
+  fi
+}
+
+# flowrsm: continue a PREVIOUS window's conversation in this one. With no
+# argument it shows an interactive arrow-key picker (each row: directory + the
+# last message of that conversation); with an id prefix it resumes that session
+# directly. The chosen transcript is merged into THIS session's file, so the
+# default per-window replay then continues it. A function (not a child process)
+# because it appends to this session's file.
+flowrsm() {
+  local cur src picked
+  cur=$(_flow_session_file)
+
+  if [[ -n $1 ]]; then
+    # Resume by id prefix: newest matching transcript that isn't this session.
+    local dir=$(_flow_sessions_dir)
+    src=$(print -rl -- "$dir"/${1}*.jsonl(Nom) 2>/dev/null | grep -v -F "$cur" | head -1)
+    [[ -z $src || ! -s $src ]] && { print -r -- "flow: no session matching '$1'."; return 1; }
+  else
+    # Interactive picker (drawn on the TTY); prints the chosen id on stdout.
+    picked=$(command flow-agent --resume-picker) || return 1
+    [[ -z $picked ]] && return 1
+    src=$(_flow_sessions_dir)/${picked}.jsonl
+    [[ -s $src ]] || { print -r -- "flow: session '$picked' is empty."; return 1; }
+  fi
+
+  cat "$src" >> "$cur" 2>/dev/null
+  local n=$(wc -l < "$src" 2>/dev/null | tr -d ' ')
+  print -r -- "flow: resumed ${n} turn(s) from $(basename ${src%.jsonl}) — continue here."
+}
+
 # _flow_dbg appends a timestamped line to the debug log when FLOW_DEBUG=1. Used
 # to trace a UAT session without guessing — set FLOW_DEBUG=1 before sourcing.
 _flow_dbg() {
@@ -205,9 +283,12 @@ flow-accept-line() {
     return
   fi
 
-  # `flowclear`: reset the daemon's NL conversation context, then clear the line.
+  # `flowclear`: reset the conversation. Clears the daemon's (legacy) context
+  # and truncates this session's transcript so the next agent turn starts fresh.
   if [[ ${BUFFER// /} == flowclear ]]; then
     _flow_clear_session
+    local f=$(_flow_session_file)
+    [[ -n $f && -f $f ]] && : > "$f"
     _flow_clear_mark
     BUFFER=""
     POSTDISPLAY=$'\n'"flow: conversation cleared"

@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/21stware/agent-the-zsh/internal/llm"
+	"github.com/21stware/agent-the-zsh/internal/session"
 )
 
 func TestDecide(t *testing.T) {
@@ -243,5 +244,95 @@ func TestLoopNoGateRejectsSideEffects(t *testing.T) {
 	})
 	if _, err := loop.Run(context.Background(), "rm stuff"); err != nil {
 		t.Fatalf("Run: %v", err)
+	}
+}
+
+// TestLoopPersistsTurns checks that a run with a SessionFile writes the user
+// task turn and the assistant turn to the transcript.
+func TestLoopPersistsTurns(t *testing.T) {
+	dir := t.TempDir()
+	sessFile := filepath.Join(dir, "s.jsonl")
+	client := scriptedServer(t, textEndSSE("Done."))
+
+	loop := New(Config{
+		Client: client, Model: "m", Cwd: dir, Level: ReviewFocused,
+		SessionFile: sessFile,
+	})
+	if _, err := loop.Run(context.Background(), "say hi"); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	msgs, err := session.Load(sessFile)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if len(msgs) != 2 {
+		t.Fatalf("persisted %d turns, want 2 (user + assistant)", len(msgs))
+	}
+	if msgs[0].Role != llm.RoleUser || msgs[0].Content[0].Text != "say hi" {
+		t.Errorf("turn 0 = %+v, want user task 'say hi'", msgs[0])
+	}
+	if msgs[1].Role != llm.RoleAssistant {
+		t.Errorf("turn 1 role = %q, want assistant", msgs[1].Role)
+	}
+}
+
+// TestLoopResumeSeedsHistory checks that with Resume set, prior transcript turns
+// are prepended before the new task, and that loaded history is not re-written
+// (the file grows only by the new turns).
+func TestLoopResumeSeedsHistory(t *testing.T) {
+	dir := t.TempDir()
+	sessFile := filepath.Join(dir, "s.jsonl")
+
+	// Seed a prior transcript: one user turn + one assistant turn.
+	prior := []llm.Message{
+		{Role: llm.RoleUser, Content: []llm.ContentBlock{llm.TextBlock("my name is Sam")}},
+		{Role: llm.RoleAssistant, Content: []llm.ContentBlock{llm.TextBlock("Hi Sam.")}},
+	}
+	if err := session.Append(sessFile, prior); err != nil {
+		t.Fatalf("seed Append: %v", err)
+	}
+
+	// Capture the request the loop sends so we can assert prior turns precede
+	// the new task in the actual message list, not just on disk.
+	var firstReqMsgs []llm.Message
+	srv := newSSEServerReq(t,
+		func(req llm.Request) { if firstReqMsgs == nil { firstReqMsgs = req.Messages } },
+		func() string { return textEndSSE("You are Sam.") })
+	client := llm.New("k", llm.WithBaseURL(srv))
+
+	loop := New(Config{
+		Client: client, Model: "m", Cwd: dir,
+		Level: ReviewFocused, SessionFile: sessFile, Resume: true,
+	})
+	if _, err := loop.Run(context.Background(), "what is my name?"); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	// The request must carry: 2 prior turns, then the new user task.
+	if len(firstReqMsgs) != 3 {
+		t.Fatalf("request had %d messages, want 3 (2 prior + new task)", len(firstReqMsgs))
+	}
+	if firstReqMsgs[0].Content[0].Text != "my name is Sam" {
+		t.Errorf("request msg 0 = %q, want prior history first", firstReqMsgs[0].Content[0].Text)
+	}
+	if firstReqMsgs[2].Content[0].Text != "what is my name?" {
+		t.Errorf("request msg 2 = %q, want new task last", firstReqMsgs[2].Content[0].Text)
+	}
+
+	msgs, err := session.Load(sessFile)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	// 2 prior + new user task + new assistant turn = 4. The loaded history must
+	// not have been re-appended (that would give 6).
+	if len(msgs) != 4 {
+		t.Fatalf("transcript has %d turns, want 4 (no double-write of history)", len(msgs))
+	}
+	if msgs[0].Content[0].Text != "my name is Sam" {
+		t.Errorf("turn 0 = %q, want preserved prior history", msgs[0].Content[0].Text)
+	}
+	if msgs[2].Role != llm.RoleUser || msgs[2].Content[0].Text != "what is my name?" {
+		t.Errorf("turn 2 = %+v, want the new user task after prior history", msgs[2])
 	}
 }

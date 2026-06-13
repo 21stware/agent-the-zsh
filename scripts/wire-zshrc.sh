@@ -15,6 +15,15 @@ block() {
 $MARK_BEGIN
 # flow: zsh smart input layer. Remove this block to uninstall the shell hook.
 export PATH="$FLOW_BIN:\$PATH"
+# Per-shell conversation id (keys the agent transcript). Exported so it survives
+# \`exec zsh\`; set only if absent so a new shell gets a fresh conversation.
+if [[ -z \${FLOW_SESSION_ID:-} ]]; then
+  if command -v uuidgen >/dev/null 2>&1; then
+    export FLOW_SESSION_ID="\$(uuidgen | tr 'A-Z' 'a-z')"
+  else
+    export FLOW_SESSION_ID="\$(date +%s)-\$\$-\${RANDOM}\${RANDOM}"
+  fi
+fi
 # Start the daemon once per machine (it self-exits if one is already running).
 if [[ -z \${FLOW_NO_AUTOSTART:-} ]] && command -v flowd >/dev/null 2>&1; then
   (flowd >/dev/null 2>&1 &) 2>/dev/null

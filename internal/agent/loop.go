@@ -6,6 +6,7 @@ import (
 	"fmt"
 
 	"github.com/21stware/agent-the-zsh/internal/llm"
+	"github.com/21stware/agent-the-zsh/internal/session"
 )
 
 // systemPrompt steers mode B: a hands-on agent that completes a task using the
@@ -70,6 +71,13 @@ type Loop struct {
 	events Events
 
 	maxTurns int
+
+	// sessionFile, when non-empty, is the per-shell JSONL transcript. New turns
+	// are appended as they are produced; on resume, prior turns seed the
+	// conversation. Empty disables persistence (a no-op).
+	sessionFile string
+	sessionID   string // for the resume picker's cwd sidecar
+	resume      bool
 }
 
 // Config configures a Loop.
@@ -81,6 +89,13 @@ type Config struct {
 	Prompt   PromptFunc // permission gate (required when any side effect may occur)
 	Events   Events
 	MaxTurns int // safety cap on tool-use iterations (default 40)
+
+	// SessionFile is the per-shell JSONL transcript path; "" disables
+	// persistence. Resume, when true, seeds the conversation with the prior
+	// turns loaded from SessionFile before the new task.
+	SessionFile string
+	SessionID   string // session id, for recording the conversation's cwd
+	Resume      bool
 }
 
 // New builds a Loop.
@@ -98,15 +113,33 @@ func New(cfg Config) *Loop {
 		prompt:   cfg.Prompt,
 		events:   cfg.Events,
 		maxTurns: max,
+
+		sessionFile: cfg.SessionFile,
+		sessionID:   cfg.SessionID,
+		resume:      cfg.Resume,
 	}
 }
 
 // Run executes the task to completion (end_turn), the max-turn cap, or ctx
 // cancellation. It returns the final assistant text and any fatal error.
 func (l *Loop) Run(ctx context.Context, task string) (string, error) {
-	msgs := []llm.Message{
-		{Role: llm.RoleUser, Content: []llm.ContentBlock{llm.TextBlock(task)}},
+	// On resume, seed the conversation with the session's prior turns. Loaded
+	// history is never re-persisted below — only turns produced this run are
+	// appended. A load failure degrades to a fresh conversation.
+	var msgs []llm.Message
+	if l.resume {
+		if prior, err := session.Load(l.sessionFile); err == nil {
+			msgs = append(msgs, prior...)
+		}
 	}
+	userTurn := llm.Message{Role: llm.RoleUser, Content: []llm.ContentBlock{llm.TextBlock(task)}}
+	msgs = append(msgs, userTurn)
+	// Best-effort persistence: a storage error must never abort the run.
+	_ = session.Append(l.sessionFile, []llm.Message{userTurn})
+	if l.sessionID != "" {
+		_ = session.SaveMeta(l.sessionID, l.cwd) // records cwd once, for the resume picker
+	}
+
 	system := fmt.Sprintf(systemPromptTmpl, l.cwd)
 	defs := Defs(l.tools)
 
@@ -140,7 +173,9 @@ func (l *Loop) Run(ctx context.Context, task string) (string, error) {
 		}
 
 		// Append the assistant turn (with any tool_use blocks) to history.
-		msgs = append(msgs, llm.Message{Role: llm.RoleAssistant, Content: resp.Content})
+		assistantTurn := llm.Message{Role: llm.RoleAssistant, Content: resp.Content}
+		msgs = append(msgs, assistantTurn)
+		_ = session.Append(l.sessionFile, []llm.Message{assistantTurn})
 
 		calls := resp.ToolCalls()
 		if len(calls) == 0 || resp.StopReason != llm.StopToolUse {
@@ -195,7 +230,9 @@ func (l *Loop) Run(ctx context.Context, task string) (string, error) {
 			results = append(results, llm.ToolResultBlock(c.ID, out, isErr))
 		}
 
-		msgs = append(msgs, llm.Message{Role: llm.RoleUser, Content: results})
+		toolTurn := llm.Message{Role: llm.RoleUser, Content: results}
+		msgs = append(msgs, toolTurn)
+		_ = session.Append(l.sessionFile, []llm.Message{toolTurn})
 	}
 	return lastText, fmt.Errorf("reached max turns (%d) without completing", l.maxTurns)
 }

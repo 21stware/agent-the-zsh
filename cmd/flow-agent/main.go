@@ -25,6 +25,7 @@ import (
 	"github.com/21stware/agent-the-zsh/internal/agent"
 	"github.com/21stware/agent-the-zsh/internal/config"
 	"github.com/21stware/agent-the-zsh/internal/llm"
+	"github.com/21stware/agent-the-zsh/internal/session"
 )
 
 // ANSI helpers (kept tiny; respect NO_COLOR).
@@ -45,6 +46,14 @@ func init() {
 }
 
 func main() {
+	// Subcommand: render the interactive resume picker and print the chosen
+	// session id to stdout (consumed by the `flowrsm` shell function). All UI is
+	// drawn on stderr/the TTY so stdout carries only the result.
+	if len(os.Args) > 1 && os.Args[1] == "--resume-picker" {
+		runResumePicker()
+		return
+	}
+
 	task := strings.TrimSpace(strings.Join(os.Args[1:], " "))
 	if task == "" {
 		// The widget passes the task via FLOW_TASK so the command line doesn't
@@ -94,6 +103,12 @@ func main() {
 	cwd, _ := os.Getwd()
 	level := agent.ParseReviewLevel(os.Getenv("FLOW_REVIEW"))
 
+	// Per-shell conversation transcript. FLOW_SESSION_ID keys the file (one shell
+	// window = one continuous conversation), so prior turns in THIS session are
+	// loaded by default. FLOW_FRESH=1 forces a one-off fresh turn; `flowclear`
+	// truncates the transcript to start the session's conversation over.
+	sessionFile, _ := session.Path(os.Getenv("FLOW_SESSION_ID"))
+	resume := os.Getenv("FLOW_FRESH") != "1"
 	// Cancel on Ctrl-C.
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -109,6 +124,7 @@ func main() {
 
 	loop := agent.New(agent.Config{
 		Client: client, Model: model, Cwd: cwd, Level: level,
+		SessionFile: sessionFile, SessionID: os.Getenv("FLOW_SESSION_ID"), Resume: resume,
 		Prompt: r.prompt,
 		Events: agent.Events{
 			OnText:       r.onText,

@@ -131,7 +131,26 @@ Open a zsh prompt and type as usual:
   output after the prompt;
 - the configured model shows on the right of the prompt (disable with
   `FLOW_RPROMPT=0`);
-- `flowclear` resets flow state.
+- `flowtmp` makes a fresh temp dir and `cd`s into it;
+- `flowrsm` continues a previous window's conversation in this one;
+- `flowclear` resets flow state and clears this session's conversation.
+
+### Conversation per session
+
+Each terminal window (one shell) is one continuous conversation: type, get an
+answer, type a follow-up — the agent remembers the earlier turns in that window
+automatically. The conversation is keyed by an exported `FLOW_SESSION_ID` (a
+UUID generated at shell start; survives `exec zsh`, a new window gets a new id),
+and every turn is appended to a per-session JSONL transcript under
+`$TMPDIR/flow-<uid>/sessions/<id>.jsonl` (0600).
+
+- `flowclear` starts the conversation over (truncates this window's transcript).
+- `flowrsm` continues a previous window's conversation here: it shows an
+  arrow-key picker (each row is the conversation's directory and last message);
+  pick one and it carries on in this window. `flowrsm <id-prefix>` resumes a
+  specific past session directly.
+- `FLOW_FRESH=1` (env) makes a single turn ignore prior history.
+
 
 Review level (how much the agent confirms before side-effecting actions):
 

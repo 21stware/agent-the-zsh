@@ -21,9 +21,9 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/oboo/terflow/internal/config"
-	"github.com/oboo/terflow/internal/daemon"
-	"github.com/oboo/terflow/internal/llm"
+	"github.com/21stware/agent-the-zsh/internal/config"
+	"github.com/21stware/agent-the-zsh/internal/daemon"
+	"github.com/21stware/agent-the-zsh/internal/llm"
 )
 
 func main() {

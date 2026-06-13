@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"github.com/oboo/terflow/internal/llm"
+	"github.com/21stware/agent-the-zsh/internal/llm"
 )
 
 // systemPrompt steers mode B: a hands-on agent that completes a task using the

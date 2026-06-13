@@ -18,9 +18,9 @@ import (
 	"net"
 	"sync"
 
-	"github.com/oboo/terflow/internal/classify"
-	"github.com/oboo/terflow/internal/env"
-	"github.com/oboo/terflow/internal/protocol"
+	"github.com/21stware/agent-the-zsh/internal/classify"
+	"github.com/21stware/agent-the-zsh/internal/env"
+	"github.com/21stware/agent-the-zsh/internal/protocol"
 )
 
 // Server holds daemon state. The classifier is read-only after construction, so

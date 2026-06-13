@@ -7,7 +7,7 @@ package agent
 import (
 	"strings"
 
-	"github.com/oboo/terflow/internal/translate"
+	"github.com/21stware/agent-the-zsh/internal/translate"
 )
 
 // ReviewLevel controls how aggressively the permission gate asks for approval.

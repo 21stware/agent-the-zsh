@@ -11,7 +11,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/oboo/terflow/internal/llm"
+	"github.com/21stware/agent-the-zsh/internal/llm"
 )
 
 // Tool is an agent tool: an llm.Tool definition plus a way to classify the risk

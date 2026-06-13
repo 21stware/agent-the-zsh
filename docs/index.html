@@ -1,0 +1,155 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>agent-the-zsh — a smart input layer for your shell</title>
+<meta name="description" content="Type commands or plain language in your own zsh. Commands run instantly; natural language is handled by an inline agent. Self-built, no SDK, works with any Anthropic-compatible provider.">
+<style>
+  :root{
+    --bg:#0f1115; --panel:#161922; --ink:#e7e9ee; --dim:#9aa3b2;
+    --accent:#7cd6c4; --accent2:#f2b56b; --line:#262b36; --code:#1b1f2a;
+    --green:#7ec699; --red:#e88; --mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+  }
+  @media (prefers-color-scheme: light){
+    :root{ --bg:#faf9f6; --panel:#fff; --ink:#1d2230; --dim:#5c6575;
+           --accent:#1b9e86; --accent2:#c0791f; --line:#e7e4dc; --code:#f3f1ea; }
+  }
+  *{box-sizing:border-box}
+  html{scroll-behavior:smooth}
+  body{margin:0;background:var(--bg);color:var(--ink);
+    font:16px/1.6 system-ui,-apple-system,Segoe UI,Roboto,sans-serif;}
+  .wrap{max-width:820px;margin:0 auto;padding:0 20px}
+  header{padding:72px 0 36px;text-align:center}
+  h1{font-size:2.6rem;margin:0 0 .25em;letter-spacing:-.02em}
+  h1 .flow{color:var(--accent)}
+  .tag{color:var(--dim);font-size:1.15rem;margin:0 auto;max-width:36em}
+  .install{margin:34px auto 8px;max-width:640px}
+  .install code{display:block;background:var(--code);border:1px solid var(--line);
+    border-radius:10px;padding:16px 18px;font-family:var(--mono);font-size:.95rem;
+    text-align:left;overflow-x:auto;white-space:nowrap}
+  .install .hint{color:var(--dim);font-size:.85rem;margin-top:8px}
+  .btns{margin-top:18px;display:flex;gap:12px;justify-content:center;flex-wrap:wrap}
+  .btn{display:inline-block;padding:9px 18px;border-radius:8px;text-decoration:none;
+    border:1px solid var(--line);color:var(--ink);font-size:.95rem}
+  .btn.primary{background:var(--accent);color:#06231d;border-color:transparent;font-weight:600}
+  section{padding:34px 0;border-top:1px solid var(--line)}
+  h2{font-size:1.45rem;margin:0 0 .6em}
+  .grid{display:grid;grid-template-columns:1fr 1fr;gap:18px}
+  @media (max-width:680px){.grid{grid-template-columns:1fr}}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:18px}
+  .card h3{margin:.1em 0 .4em;font-size:1.05rem}
+  .card p{margin:0;color:var(--dim);font-size:.95rem}
+  pre{background:var(--code);border:1px solid var(--line);border-radius:12px;
+    padding:16px 18px;overflow-x:auto;font-family:var(--mono);font-size:.9rem;line-height:1.5}
+  .term .p{color:var(--accent)}
+  .term .c{color:var(--dim)}
+  .term .ok{color:var(--green)}
+  .term .r{color:var(--dim);float:right}
+  kbd{background:var(--code);border:1px solid var(--line);border-bottom-width:2px;
+    border-radius:5px;padding:1px 6px;font-family:var(--mono);font-size:.85em}
+  table{width:100%;border-collapse:collapse;font-size:.95rem}
+  td{padding:7px 10px;border-top:1px solid var(--line);vertical-align:top}
+  td code{font-family:var(--mono);color:var(--accent2)}
+  footer{padding:40px 0 60px;color:var(--dim);text-align:center;font-size:.9rem;border-top:1px solid var(--line)}
+  a{color:var(--accent)}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header>
+  <h1><span class="flow">flow</span> · agent-the-zsh</h1>
+  <p class="tag">Type commands in your own zsh as usual. They run instantly. Type
+    plain language and an agent picks it up — inline, right below your prompt.</p>
+
+  <div class="install">
+    <code>curl -fsSL https://21stware.github.io/agent-the-zsh/install | bash</code>
+    <div class="hint">macOS or Linux · needs zsh · then run <kbd>exec zsh</kbd></div>
+  </div>
+  <div class="btns">
+    <a class="btn primary" href="#how">How it works</a>
+    <a class="btn" href="https://github.com/21stware/agent-the-zsh">GitHub</a>
+  </div>
+</header>
+
+<section id="how">
+  <h2>One input line, three outcomes</h2>
+  <pre class="term"><span class="p">~/proj</span> git status                                  <span class="r">(claude-opus-4-6)</span>
+<span class="c"># ↑ a real command — runs instantly, zero latency, untouched</span>
+
+<span class="p">~/proj</span> 这个目录是什么项目
+<span class="c">  flow · dir ~/proj · review focused</span>
+  🧠 <span class="c">thinking… checking the files here</span>
+  ● bash: ls -la &amp;&amp; cat README.md
+  <span class="ok">✓</span> <span class="c">README.md, cmd/, internal/, go.mod …</span>
+  A Go + zsh project: a smart shell input layer with a
+  self-built agent. <span class="c"># ← typed text stays; agent answers below</span>
+
+<span class="p">~/proj</span> delete every .o file under build
+  ● bash: find build -name '*.o' -delete
+  ⚠ <span class="c">approve [high-risk]   [y] run  [n] reject  [a] all  [s] strict</span></pre>
+</section>
+
+<section>
+  <h2>What it does</h2>
+  <div class="grid">
+    <div class="card"><h3>Zero-latency commands</h3>
+      <p>Real shell commands run exactly as if flow weren't installed — the
+      classification is offline and local, never touches the network.</p></div>
+    <div class="card"><h3>Natural language → agent</h3>
+      <p>Plain language is handed to an inline agent that can run a command, do
+      multi-step work, or just answer — streaming its thinking and output.</p></div>
+    <div class="card"><h3>Your text is preserved</h3>
+      <p>flow never silently rewrites your input line. What you typed stays where
+      you typed it; everything else prints below.</p></div>
+    <div class="card"><h3>Permission you control</h3>
+      <p>Reads run freely; side-effects are gated by a review level
+      (<code>focused</code> / <code>strict</code> / <code>yolo</code>). Approve with
+      <kbd>y</kbd>/<kbd>n</kbd>/<kbd>a</kbd>/<kbd>s</kbd>.</p></div>
+    <div class="card"><h3>Any provider</h3>
+      <p>Speaks the Anthropic Messages protocol directly (no SDK). Works with the
+      first-party API or any compatible proxy (GLM, DeepSeek, a gateway).</p></div>
+    <div class="card"><h3>Never bricks your shell</h3>
+      <p>If the daemon is down or slow, flow degrades to plain zsh. It only takes
+      over the judgment of a single input line.</p></div>
+  </div>
+</section>
+
+<section>
+  <h2>Configure a provider</h2>
+  <p style="color:var(--dim)">Set one of these in your shell or
+    <code>~/.claude/settings.json</code> (same convention as Claude Code, so an
+    existing setup just works):</p>
+  <pre><span class="c"># compatible proxy (Bearer)</span>
+export ANTHROPIC_BASE_URL="https://your-proxy.example"
+export ANTHROPIC_AUTH_TOKEN="sk-..."
+
+<span class="c"># or first-party API</span>
+export ANTHROPIC_API_KEY="sk-ant-..."</pre>
+  <p style="color:var(--dim)">The model name is auto-discovered and shown on the
+    right of your prompt. Check status with <code>flow-doctor</code>.</p>
+</section>
+
+<section>
+  <h2>Install options</h2>
+  <table>
+    <tr><td><b>One line</b></td>
+      <td><code>curl -fsSL https://21stware.github.io/agent-the-zsh/install | bash</code></td></tr>
+    <tr><td><b>From source</b></td>
+      <td><code>git clone https://github.com/21stware/agent-the-zsh &amp;&amp; cd agent-the-zsh &amp;&amp; make install</code></td></tr>
+    <tr><td><b>Activate</b></td>
+      <td><code>exec zsh</code> &nbsp;(new terminals pick it up automatically)</td></tr>
+    <tr><td><b>Uninstall</b></td>
+      <td><code>make uninstall</code> &nbsp;(or remove the <code># &gt;&gt;&gt; flow &gt;&gt;&gt;</code> block from <code>~/.zshrc</code>)</td></tr>
+  </table>
+</section>
+
+<footer>
+  flow · agent-the-zsh — a self-built zsh smart input layer.
+  <a href="https://github.com/21stware/agent-the-zsh">source &amp; docs on GitHub</a>
+</footer>
+
+</div>
+</body>
+</html>

@@ -8,7 +8,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/oboo/terflow/internal/agent"
+	"github.com/21stware/agent-the-zsh/internal/agent"
 )
 
 // runner renders the agent run on the TTY: an animated spinner while waiting,

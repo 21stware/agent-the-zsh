@@ -51,7 +51,14 @@ install: build
 	install -m 0755 $(DOCTOR_SRC) "$(SHARE_DIR)/flow-doctor"
 	@FLOW_BIN="$(BINDIR)" SHARE_DIR="$(SHARE_DIR)" ./scripts/wire-zshrc.sh
 	@echo ""
-	@echo "Installed. Open a new shell (or 'source ~/.zshrc') to start using flow."
+	@echo "  ✓ flow installed."
+	@echo ""
+	@echo "  Your CURRENT shell won't pick it up automatically. To activate now:"
+	@echo ""
+	@echo "      exec zsh"
+	@echo ""
+	@echo "  (new terminals get it automatically). Then type a command or natural"
+	@echo "  language at the prompt. Check status: $(SHARE_DIR)/flow-doctor"
 
 uninstall:
 	@rm -f "$(BINDIR)/flowd" "$(BINDIR)/flow-agent"

@@ -1,4 +1,4 @@
-module github.com/oboo/terflow
+module github.com/21stware/agent-the-zsh
 
 go 1.25.0
 

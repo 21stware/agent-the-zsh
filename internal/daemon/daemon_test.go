@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/oboo/terflow/internal/protocol"
+	"github.com/21stware/agent-the-zsh/internal/protocol"
 )
 
 // shortSocketDir returns a short-pathed temp dir. macOS limits unix socket

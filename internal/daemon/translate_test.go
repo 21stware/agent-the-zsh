@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/oboo/terflow/internal/protocol"
+	"github.com/21stware/agent-the-zsh/internal/protocol"
 )
 
 // TestDecideCommand: a command verdict accepts and is never routed to the agent.

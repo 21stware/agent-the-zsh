@@ -22,9 +22,9 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/oboo/terflow/internal/agent"
-	"github.com/oboo/terflow/internal/config"
-	"github.com/oboo/terflow/internal/llm"
+	"github.com/21stware/agent-the-zsh/internal/agent"
+	"github.com/21stware/agent-the-zsh/internal/config"
+	"github.com/21stware/agent-the-zsh/internal/llm"
 )
 
 // ANSI helpers (kept tiny; respect NO_COLOR).

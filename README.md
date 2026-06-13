@@ -1,6 +1,6 @@
-# flow
+# agent-the-zsh
 
-A zsh smart input layer. You type in your own zsh as usual; on Enter:
+**flow** — a zsh smart input layer. You type in your own zsh as usual; on Enter:
 
 - **Shell command** → runs immediately, zero latency, exactly as if flow were
   not installed.
@@ -46,14 +46,25 @@ judgment of a single input line: run it as a command, or hand it to the agent.
 
 ## Install
 
+One line (macOS/Linux, needs zsh):
+
+```sh
+curl -fsSL https://21stware.github.io/agent-the-zsh/install | bash
+exec zsh
+```
+
+It downloads the matching release (or builds from source if Go is present),
+installs to `~/.local`, and wires `~/.zshrc`. Site & docs:
+<https://21stware.github.io/agent-the-zsh/>.
+
+### From source
+
 Requires **Go 1.25+** and **zsh** (with the `zsh/net/socket` module — standard on
 macOS and most Linux zsh builds).
 
-### From source (local machine)
-
 ```sh
 make install            # builds, installs to ~/.local, wires ~/.zshrc + autostart
-exec zsh                # or open a new terminal
+exec zsh                # current shell won't pick it up until you do this
 ```
 
 `make install` puts `flowd` and `flow-agent` in `~/.local/bin`, the widget in

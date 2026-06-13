@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/oboo/terflow/internal/llm"
+	"github.com/21stware/agent-the-zsh/internal/llm"
 )
 
 func TestDecide(t *testing.T) {

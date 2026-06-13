@@ -20,7 +20,9 @@
 #   source /path/to/flow.zsh
 
 # --- configuration (override before sourcing) -------------------------------
-: ${FLOW_SOCKET:="${XDG_RUNTIME_DIR:-${TMPDIR:-/tmp}/flow-${UID}}/flow/flowd.sock"}
+# FLOW_SOCKET, if set, is an explicit override; otherwise _flow_socket_path
+# derives it to match the daemon's daemon.SocketPath() (see below). Do NOT
+# pre-seed a default here — an incorrect default would shadow that logic.
 : ${FLOW_TIMEOUT:=0.4}      # daemon-reply read timeout; bounds command path + dead daemon
 : ${FLOW_HISTORY_LINES:=10} # recent history lines sent as context
 : ${FLOW_PROTO:=1}

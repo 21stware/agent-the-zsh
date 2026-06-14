@@ -39,6 +39,23 @@ var (
 	cCyan   = "\033[36m"
 )
 
+// isTTY is true when stdout is an interactive terminal (cursor control is safe).
+var isTTY = func() bool {
+	fi, err := os.Stdout.Stat()
+	return err == nil && (fi.Mode()&os.ModeCharDevice) != 0
+}()
+
+// clearLines moves the cursor up n lines, erasing each one.
+// Used to redraw live-streaming table/code blocks in place.
+func clearLines(n int) {
+	if !isTTY || n <= 0 {
+		return
+	}
+	for i := 0; i < n; i++ {
+		fmt.Print("\033[1A\033[2K")
+	}
+}
+
 func init() {
 	if os.Getenv("NO_COLOR") != "" {
 		cReset, cDim, cBold, cYellow, cRed, cGreen, cCyan = "", "", "", "", "", "", ""
@@ -118,9 +135,8 @@ func main() {
 
 	r := newRunner(level)
 
-	fmt.Printf("%s flow %s  %sdir %s · review %s%s\n",
+	fmt.Printf("%s flow %s  %sdir %s · review %s%s\n\n",
 		cBold+cCyan, cReset, cDim, cwd, level, cReset)
-	fmt.Printf("%s task: %s%s\n\n", cDim, task, cReset)
 
 	loop := agent.New(agent.Config{
 		Client: client, Model: model, Cwd: cwd, Level: level,

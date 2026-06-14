@@ -22,9 +22,15 @@ type runner struct {
 	stopCh   chan struct{}
 	frame    int
 
-	textBuf   strings.Builder // assistant text awaiting a newline to render
-	thinkOpen bool            // currently showing a thinking block
-	anyOutput bool            // produced visible output since last spinner start
+	textBuf     strings.Builder // assistant text awaiting a newline to render
+	thinkOpen   bool            // currently showing a thinking block
+	anyOutput   bool            // produced visible output since last spinner start
+	inCodeBlock  bool
+	codeLang     string
+	codeBuf      strings.Builder
+	codePrinted  int      // terminal lines printed while streaming code (for rewind)
+	tableLines   []string
+	tablePrinted int      // terminal lines printed for current live table render
 }
 
 func newRunner(level agent.ReviewLevel) *runner {
@@ -115,6 +121,17 @@ func (r *runner) flushText() {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.closeThinkingLocked()
+	// Live-rendered table is already on screen; just reset tracking.
+	r.tableLines = nil
+	r.tablePrinted = 0
+	// Unclosed code block: rewind yellow lines and highlight.
+	if r.inCodeBlock && r.codeBuf.Len() > 0 {
+		clearLines(r.codePrinted)
+		fmt.Println(highlightCode(r.codeLang, r.codeBuf.String()))
+		r.inCodeBlock = false
+		r.codeBuf.Reset()
+		r.codePrinted = 0
+	}
 	rest := r.textBuf.String()
 	r.textBuf.Reset()
 	if strings.TrimSpace(rest) != "" {
@@ -122,8 +139,9 @@ func (r *runner) flushText() {
 	}
 }
 
-// renderBufferedLinesLocked emits every complete (newline-terminated) line in
-// the buffer through the markdown renderer, leaving any partial last line.
+// renderBufferedLinesLocked emits every complete (newline-terminated) line.
+// Tables stream with per-row realignment (clearLines + rerender).
+// Code blocks stream immediately in yellow, then rewind+highlight on close.
 func (r *runner) renderBufferedLinesLocked() {
 	s := r.textBuf.String()
 	for {
@@ -132,8 +150,51 @@ func (r *runner) renderBufferedLinesLocked() {
 			break
 		}
 		line := s[:i]
-		fmt.Println(renderMarkdownLine(line))
 		s = s[i+1:]
+
+		if strings.HasPrefix(line, "```") {
+			// Seal any open table before starting/ending a code block.
+			r.tableLines = nil
+			r.tablePrinted = 0
+			if !r.inCodeBlock {
+				r.inCodeBlock = true
+				r.codeLang = strings.TrimSpace(strings.TrimPrefix(line, "```"))
+				r.codeBuf.Reset()
+				r.codePrinted = 0
+				if r.codeLang != "" {
+					fmt.Println(cDim + "[ " + r.codeLang + " ]" + cReset)
+				}
+			} else {
+				r.inCodeBlock = false
+				clearLines(r.codePrinted)
+				fmt.Println(highlightCode(r.codeLang, r.codeBuf.String()))
+				r.codeBuf.Reset()
+				r.codePrinted = 0
+			}
+			continue
+		}
+
+		if r.inCodeBlock {
+			r.codeBuf.WriteString(line + "\n")
+			fmt.Println(cYellow + line + cReset)
+			r.codePrinted++
+			continue
+		}
+
+		if isTableLine(line) {
+			clearLines(r.tablePrinted)
+			r.tableLines = append(r.tableLines, line)
+			rendered := renderTable(r.tableLines)
+			fmt.Print(rendered + "\n")
+			r.tablePrinted = strings.Count(rendered, "\n") + 1
+			continue
+		}
+
+		// Leaving table context — already live-rendered, just reset.
+		r.tableLines = nil
+		r.tablePrinted = 0
+
+		fmt.Println(renderMarkdownLine(line))
 	}
 	r.textBuf.Reset()
 	r.textBuf.WriteString(s)

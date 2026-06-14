@@ -173,7 +173,11 @@ _flow_clear_session() {
   # read+discard the ack with a short timeout, then close
   local junk
   sysread -t 0.4 -i $fd junk 2>/dev/null
-  exec {fd}>&- 2>/dev/null
+  # NOTE: no `2>/dev/null` here. `exec {fd}>&-` with no command applies its
+  # redirections to the CURRENT shell permanently, so a trailing `2>/dev/null`
+  # would silently send the shell's stderr to /dev/null forever — swallowing
+  # every later command's errors. The fd is always valid here, so just close it.
+  exec {fd}>&-
 }
 
 # _flow_open connects to the daemon and sends the request for the current
@@ -197,7 +201,7 @@ _flow_open() {
 
 # _flow_close closes the daemon socket fd, if open.
 _flow_close() {
-  [[ -n $FLOW_FD ]] && exec {FLOW_FD}>&- 2>/dev/null
+  [[ -n $FLOW_FD ]] && exec {FLOW_FD}>&-
   unset FLOW_FD
 }
 
@@ -380,10 +384,10 @@ _flow_query_info() {
   [[ -S $sock ]] || return 1
   zsocket "$sock" 2>/dev/null || return 1
   local fd=$REPLY
-  print -u $fd -r -- "{\"info\":true,\"proto\":$FLOW_PROTO}" 2>/dev/null || { exec {fd}>&- 2>/dev/null; return 1; }
+  print -u $fd -r -- "{\"info\":true,\"proto\":$FLOW_PROTO}" 2>/dev/null || { exec {fd}>&-; return 1; }
   local reply="" chunk
   if sysread -t 0.5 -i $fd reply 2>/dev/null; then :; fi
-  exec {fd}>&- 2>/dev/null
+  exec {fd}>&-
   reply=${reply%%$'\n'*}
   local model=$(_flow_json_field "$reply" model)
   [[ -n $model ]] && print -r -- "$model"

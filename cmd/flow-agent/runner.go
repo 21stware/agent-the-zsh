@@ -7,6 +7,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	"github.com/21stware/agent-the-zsh/internal/agent"
 )
@@ -158,11 +159,7 @@ func (r *runner) onToolResult(c agent.ToolCall, result string, isErr bool) {
 	if isErr {
 		mark, col = "✗", cRed
 	}
-	preview := result
-	if len(preview) > 600 {
-		preview = preview[:600] + "…"
-	}
-	fmt.Printf("%s  %s%s %s\n", col, mark, cReset, dimIndent(preview))
+	fmt.Printf("%s  %s%s %s\n", col, mark, cReset, dimIndent(previewResult(result, isErr)))
 	// Resume the spinner: the next model turn is about to stream.
 	r.startSpinner()
 }
@@ -220,6 +217,61 @@ func readKey() string {
 // dimText wraps a string in the dim color (no reset, so a thinking block stays
 // dim across deltas; the block is closed explicitly).
 func dimText(s string) string { return s }
+
+// Preview budgets (in bytes) for tool output shown to the user. The model
+// always receives the full output; these only bound what we print to the TTY.
+const (
+	previewMax = 600 // success: show the head only
+	errHeadMax = 400 // error: bytes kept from the start
+	errTailMax = 600 // error: bytes kept from the end (where the real error lives)
+)
+
+// previewResult bounds tool output for display. Success output is truncated
+// head-only (the interesting part is usually first). Error output keeps BOTH a
+// head and a tail, because tool failures put the actual diagnostic — a stack
+// trace, a compiler/test message, the "[command failed (exit N)]" marker — at
+// the END. A plain head-only cut would swallow exactly the line the user needs.
+// All cuts land on UTF-8 rune boundaries so multibyte text (e.g. Chinese error
+// messages) is never corrupted at the seam.
+func previewResult(s string, isErr bool) string {
+	if !isErr {
+		if len(s) <= previewMax {
+			return s
+		}
+		return headBytes(s, previewMax) + "…"
+	}
+	if len(s) <= errHeadMax+errTailMax {
+		return s
+	}
+	head := headBytes(s, errHeadMax)
+	tail := tailBytes(s, errTailMax)
+	return head + "\n…\n" + tail
+}
+
+// headBytes returns the longest prefix of s that fits in n bytes without
+// splitting a UTF-8 rune.
+func headBytes(s string, n int) string {
+	if len(s) <= n {
+		return s
+	}
+	for n > 0 && !utf8.RuneStart(s[n]) {
+		n--
+	}
+	return s[:n]
+}
+
+// tailBytes returns the longest suffix of s that fits in n bytes without
+// splitting a UTF-8 rune.
+func tailBytes(s string, n int) string {
+	if len(s) <= n {
+		return s
+	}
+	start := len(s) - n
+	for start < len(s) && !utf8.RuneStart(s[start]) {
+		start++
+	}
+	return s[start:]
+}
 
 // dimIndent indents multi-line tool output under the result marker.
 func dimIndent(s string) string {

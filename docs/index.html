@@ -268,52 +268,65 @@
         ><span class="p">~/proj</span> git log --oneline -5                            <span class="r">(claude-opus-4-6)</span>
 <span class="ok">a1b2c3d feat: add streaming parse</span>
 <span class="ok">e4f5g6h fix: stderr silenced in widget</span>
-<span class="c"># ↑ classified as CMD → accept-line, zero latency, no network</span></pre>
+<span class="c"># classified as CMD, accept-line, zero latency, no network</span></pre>
 
         <p class="demo-label" style="margin-top: 24px">
           Natural language — agent answers inline
         </p>
-        <pre class="term"><span class="p">~/proj</span> 这个项目用了哪些依赖？
+        <pre
+          class="term"
+        ><span class="p">~/proj</span> what dependencies does this project use
 <span class="c">  dir ~/proj · review focused</span>
-  🧠 <span class="c">reading go.mod…</span>
-  ● read_file: go.mod
-  <span class="ok">✓</span>
-  这个项目主要依赖：
-  - <span class="c">mvdan.cc/sh/v3</span> — shell parser (用于 CMD/NL 分类)
-  - <span class="c">anthropic Messages API</span> — LLM 调用 (raw HTTP, no SDK)
-  - 标准库 <span class="c">net/http, encoding/json</span>
-  <span class="c"># ← typed text stays on its line; agent output below</span></pre>
+  <span class="c">🧠 thinking</span>
+  <span class="c">  reading go.mod to check the dependencies…</span>
+  <span class="c">● bash: cat go.mod</span>
+  <span class="ok">  ✓</span> <span class="c">module github.com/21stware/agent-the-zsh</span>
+  <span class="c">    require (</span>
+  <span class="c">      mvdan.cc/sh/v3 v3.8.0</span>
+  <span class="c">      …</span>
+  <span class="c">    )</span>
+  This project depends on:
+  - <strong>mvdan.cc/sh/v3</strong> — shell parser for CMD/NL classification
+  - Anthropic Messages API via raw HTTP (no SDK)
+  - Go standard library (net/http, encoding/json)
+  <span class="c"># typed text stays on its line; agent output below</span></pre>
 
         <p class="demo-label" style="margin-top: 24px">
           Multi-step work — agent plans, approves, executes
         </p>
         <pre
           class="term"
-        ><span class="p">~/proj</span> 把所有 .log 文件加到 .gitignore
+        ><span class="p">~/proj</span> add all .log files to .gitignore
 <span class="c">  dir ~/proj · review focused</span>
-  🧠 <span class="c">checking current .gitignore and .log files…</span>
-  ● bash: find . -name '*.log' | head -20
-  <span class="ok">✓</span> <span class="c">app.log, debug.log, test.log</span>
-  ● read_file: .gitignore
-  <span class="ok">✓</span>
-  ● edit: .gitignore  <span class="c">(append *.log)</span>
-  <span class="warn">⚠ approve [low-risk]</span>  <span class="c">edit: .gitignore</span>
-  <span class="c">  [y] run  [n] reject  [a] allow all  [s] strict mode</span>
-  <span class="c">  > </span>y<span class="ok">✓</span> <span class="c">done — *.log added to .gitignore</span></pre>
+  <span class="c">🧠 thinking</span>
+  <span class="c">  I need to check the current .gitignore and find .log files…</span>
+  <span class="c">● bash: find . -name '*.log' | head -20</span>
+  <span class="ok">  ✓</span> <span class="c">app.log</span>
+  <span class="c">    debug.log</span>
+  <span class="c">    test.log</span>
+  <span class="c">● read_file: .gitignore</span>
+  <span class="ok">  ✓</span>
+  <span class="warn">⚠ approve [low-risk]</span>  <span class="c">edit: .gitignore (append *.log)</span>
+  <span class="c">  [y] run  [n] reject  [a] allow all (this task)  [s] strict mode</span>
+  <span class="c">  > </span>y
+  <span class="ok">  ✓</span>
+  Done — <strong>*.log</strong> added to .gitignore.</pre>
 
         <p class="demo-label" style="margin-top: 24px">
           Dangerous action — gated by review level
         </p>
-        <pre class="term"><span class="p">~/proj</span> 删掉 dist 目录
+        <pre
+          class="term"
+        ><span class="p">~/proj</span> delete the dist directory
 <span class="c">  dir ~/proj · review focused</span>
-  🧠 <span class="c">checking if dist/ exists…</span>
-  ● bash: ls -d dist 2>/dev/null
-  <span class="ok">✓</span> <span class="c">dist/</span>
+  <span class="c">🧠 thinking</span>
+  <span class="c">  checking if dist/ exists before deleting…</span>
+  <span class="c">● bash: ls -d dist 2>/dev/null</span>
+  <span class="ok">  ✓</span> <span class="c">dist/</span>
   <span class="red">⚠ approve [high-risk]</span>  <span class="c">bash: rm -r dist</span>
-  <span class="c">  [y] run  [n] reject  [a] allow all  [s] strict mode</span>
+  <span class="c">  [y] run  [n] reject  [a] allow all (this task)  [s] strict mode</span>
   <span class="c">  > </span>n
-  <span class="c">  rejected.</span>
-  <span class="c"># ← you stay in control of destructive actions</span></pre>
+  <span class="c"># you stay in control of destructive actions</span></pre>
       </section>
 
       <section>
@@ -383,45 +396,46 @@
         </p>
         <pre
           class="term"
-        ><span class="p">~/proj</span> go test ./... 跑一下看看有没有失败的
+        ><span class="p">~/proj</span> run the tests and tell me if any fail
 <span class="c">  dir ~/proj · review focused</span>
-  🧠 <span class="c">running tests…</span>
-  ● bash: go test ./...
-  <span class="ok">✓</span> <span class="c">ok  internal/classify  0.012s</span>
+  <span class="c">🧠 thinking</span>
+  <span class="c">  running go test for all packages…</span>
+  <span class="c">● bash: go test ./...</span>
+  <span class="ok">  ✓</span> <span class="c">ok  internal/classify  0.012s</span>
   <span class="c">    ok  internal/config    0.008s</span>
   <span class="c">    ok  internal/llm       0.003s</span>
-  全部通过，没有失败的测试。
+  All tests passed — no failures.
 
-<span class="p">~/proj</span> 把失败的包名告诉我
+<span class="p">~/proj</span> which packages were tested
 <span class="c">  dir ~/proj · review focused</span>
-  没有失败的包 — 上一步所有测试都通过了。
-  <span class="c"># ← remembers the test result from the previous turn</span></pre>
-        <div class="grid">
-          <div class="card">
-            <h3><code>flowtmp</code></h3>
-            <p>
-              Make a fresh temp dir and <code>cd</code> into it — a scratch
+  Based on the previous run, three packages were tested:
+  <strong>internal/classify</strong>, <strong>internal/config</strong>, and
+  <strong>internal/llm</strong> — all passed.
+  <span class="c"># remembers the test result from the previous turn</span></pre>
+        <table>
+          <tr>
+            <td><code>flowtmp</code></td>
+            <td>
+              Create a fresh temp dir and <code>cd</code> into it — a scratch
               space for the current window.
-            </p>
-          </div>
-          <div class="card">
-            <h3><code>flowrsm</code></h3>
-            <p>
-              Continue a previous window's conversation here. Shows an arrow-key
-              picker (each row: directory + that conversation's last message);
-              pick one and it carries on in this window.
+            </td>
+          </tr>
+          <tr>
+            <td><code>flowrsm</code></td>
+            <td>
+              Resume a previous window's conversation. Shows an arrow-key
+              picker; pick one and it carries on here.
               <code>flowrsm &lt;id&gt;</code> resumes a specific one.
-            </p>
-          </div>
-          <div class="card">
-            <h3><code>flowclear</code></h3>
-            <p>
-              Start this window's conversation over (clears its transcript and
-              review level). Use <code>FLOW_FRESH=1</code> to make a single turn
-              ignore history.
-            </p>
-          </div>
-        </div>
+            </td>
+          </tr>
+          <tr>
+            <td><code>flowclear</code></td>
+            <td>
+              Reset this window's conversation (clears transcript and review
+              level). <code>FLOW_FRESH=1</code> for a one-off fresh turn.
+            </td>
+          </tr>
+        </table>
         <p style="color: var(--dim)">
           Transcripts live under
           <code>$TMPDIR/flow-&lt;uid&gt;/sessions/</code> (owner-only, cleared

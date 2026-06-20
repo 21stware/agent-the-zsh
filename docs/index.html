@@ -256,13 +256,48 @@
         margin-left: 8px;
         vertical-align: middle;
       }
+      .lang-switch {
+        position: fixed;
+        top: 14px;
+        right: 14px;
+        z-index: 20;
+        display: flex;
+        gap: 4px;
+        background: var(--panel);
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        padding: 3px;
+        font-family: var(--mono);
+        font-size: 0.8rem;
+      }
+      .lang-switch button {
+        background: none;
+        border: none;
+        color: var(--dim);
+        cursor: pointer;
+        padding: 3px 9px;
+        border-radius: 6px;
+        line-height: 1.4;
+      }
+      .lang-switch button:hover {
+        color: var(--ink);
+      }
+      .lang-switch button.active {
+        background: var(--accent);
+        color: #06231d;
+        font-weight: 600;
+      }
     </style>
   </head>
   <body>
+    <div class="lang-switch" role="group" aria-label="Language">
+      <button type="button" data-lang="en" onclick="applyLang('en')">EN</button>
+      <button type="button" data-lang="zh" onclick="applyLang('zh')">中文</button>
+    </div>
     <div class="wrap">
       <header>
         <h1>agent-the-zsh <span class="badge">v0.2.2</span></h1>
-        <p class="tag">
+        <p class="tag" data-i18n="hero.tag">
           A smart input layer for zsh. Commands run instantly. Plain language is
           handled by an inline agent — right below your prompt, in your own
           terminal, with your own tools.
@@ -305,12 +340,12 @@
               <polyline points="20 6 9 17 4 12" />
             </svg>
           </button>
-          <div class="hint">
+          <div class="hint" data-i18n="hero.hint">
             macOS or Linux · needs zsh · then run <kbd>exec zsh</kbd>
           </div>
         </div>
         <div class="btns">
-          <a class="btn primary" href="#how">How it works</a>
+          <a class="btn primary" href="#how" data-i18n="nav.how">How it works</a>
           <a class="btn" href="https://github.com/21stware/agent-the-zsh"
             >GitHub</a
           >
@@ -318,21 +353,23 @@
       </header>
 
       <section id="how">
-        <h2>One input line, two paths</h2>
+        <h2 data-i18n="h2.how">One input line, two paths</h2>
 
-        <p class="demo-label">Shell command — runs instantly, untouched</p>
+        <p class="demo-label" data-i18n="dl.cmd">Shell command — runs instantly, untouched</p>
         <pre
           class="term"
+          data-i18n="term.demo1"
         ><span class="p">~/proj</span> git log --oneline -5                            <span class="r">(claude-opus-4-6)</span>
 <span class="ok">a1b2c3d feat: add streaming parse</span>
 <span class="ok">e4f5g6h fix: stderr silenced in widget</span>
 <span class="c"># classified as CMD, accept-line, zero latency, no network</span></pre>
 
-        <p class="demo-label" style="margin-top: 24px">
+        <p class="demo-label" style="margin-top: 24px" data-i18n="dl.nl">
           Natural language — agent answers inline
         </p>
         <pre
           class="term"
+          data-i18n="term.demo2"
         ><span class="p">~/proj</span> what dependencies does this project use
 <span class="c">  dir ~/proj · review focused</span>
   <span class="c">🧠 thinking</span>
@@ -349,11 +386,12 @@
   - Go standard library (net/http, encoding/json)
   <span class="c"># typed text stays on its line; agent output below</span></pre>
 
-        <p class="demo-label" style="margin-top: 24px">
+        <p class="demo-label" style="margin-top: 24px" data-i18n="dl.multi">
           Multi-step work — agent plans, approves, executes
         </p>
         <pre
           class="term"
+          data-i18n="term.demo3"
         ><span class="p">~/proj</span> add all .log files to .gitignore
 <span class="c">  dir ~/proj · review focused</span>
   <span class="c">🧠 thinking</span>
@@ -370,11 +408,12 @@
   <span class="ok">  ✓</span>
   Done — <strong>*.log</strong> added to .gitignore.</pre>
 
-        <p class="demo-label" style="margin-top: 24px">
+        <p class="demo-label" style="margin-top: 24px" data-i18n="dl.danger">
           Dangerous action — gated by review level
         </p>
         <pre
           class="term"
+          data-i18n="term.demo4"
         ><span class="p">~/proj</span> delete the dist directory
 <span class="c">  dir ~/proj · review focused</span>
   <span class="c">🧠 thinking</span>
@@ -388,34 +427,34 @@
       </section>
 
       <section>
-        <h2>What it does</h2>
+        <h2 data-i18n="h2.what">What it does</h2>
         <div class="grid">
           <div class="card">
-            <h3>Zero-latency commands</h3>
-            <p>
+            <h3 data-i18n="card1.h">Zero-latency commands</h3>
+            <p data-i18n="card1.p">
               Real shell commands run exactly as if agent-the-zsh weren't
               installed — the classification is offline and local, never touches
               the network.
             </p>
           </div>
           <div class="card">
-            <h3>Natural language → agent</h3>
-            <p>
+            <h3 data-i18n="card2.h">Natural language → agent</h3>
+            <p data-i18n="card2.p">
               Plain language is handed to an inline agent that can run a
               command, do multi-step work, or just answer — streaming its
               thinking and output.
             </p>
           </div>
           <div class="card">
-            <h3>Your text is preserved</h3>
-            <p>
+            <h3 data-i18n="card3.h">Your text is preserved</h3>
+            <p data-i18n="card3.p">
               What you typed stays where you typed it. The agent runs below it —
               nothing is silently rewritten into your input line.
             </p>
           </div>
           <div class="card">
-            <h3>Permission you control</h3>
-            <p>
+            <h3 data-i18n="card4.h">Permission you control</h3>
+            <p data-i18n="card4.p">
               Reads run freely; side-effects are gated by a review level (<code
                 >focused</code
               >
@@ -425,8 +464,8 @@
             </p>
           </div>
           <div class="card">
-            <h3>Multi-provider config</h3>
-            <p>
+            <h3 data-i18n="card5.h">Multi-provider config</h3>
+            <p data-i18n="card5.p">
               <code>~/.flow/settings.json</code> supports Anthropic and
               OpenAI-compatible providers. Falls back to
               <code>~/.claude/settings.json</code>. No SDK — raw HTTP/JSON +
@@ -434,8 +473,8 @@
             </p>
           </div>
           <div class="card">
-            <h3>Never bricks your shell</h3>
-            <p>
+            <h3 data-i18n="card6.h">Never bricks your shell</h3>
+            <p data-i18n="card6.p">
               If the daemon is down or slow, it degrades to plain zsh.
               Misclassified input is caught by
               <code>command_not_found_handler</code> and routed back to the
@@ -446,14 +485,15 @@
       </section>
 
       <section>
-        <h2>Conversation per window</h2>
-        <p style="color: var(--dim)">
+        <h2 data-i18n="h2.conv">Conversation per window</h2>
+        <p style="color: var(--dim)" data-i18n="conv.intro">
           Each terminal window is one continuous conversation. Ask, get an
           answer, ask a follow-up — the agent remembers the earlier turns in
           that window automatically. Open a new window for a clean slate.
         </p>
         <pre
           class="term"
+          data-i18n="term.conv"
         ><span class="p">~/proj</span> run the tests and tell me if any fail
 <span class="c">  dir ~/proj · review focused</span>
   <span class="c">🧠 thinking</span>
@@ -473,14 +513,14 @@
         <table>
           <tr>
             <td><code>flowtmp</code></td>
-            <td>
+            <td data-i18n="row.tmp">
               Create a fresh temp dir and <code>cd</code> into it — a scratch
               space for the current window.
             </td>
           </tr>
           <tr>
             <td><code>flowrsm</code></td>
-            <td>
+            <td data-i18n="row.rsm">
               Resume a previous window's conversation. Shows an arrow-key
               picker; pick one and it carries on here.
               <code>flowrsm &lt;id&gt;</code> resumes a specific one.
@@ -488,13 +528,13 @@
           </tr>
           <tr>
             <td><code>flowclear</code></td>
-            <td>
+            <td data-i18n="row.clear">
               Reset this window's conversation (clears transcript and review
               level). <code>FLOW_FRESH=1</code> for a one-off fresh turn.
             </td>
           </tr>
         </table>
-        <p style="color: var(--dim)">
+        <p style="color: var(--dim)" data-i18n="transcripts">
           Transcripts live under
           <code>$TMPDIR/flow-&lt;uid&gt;/sessions/</code> (owner-only, cleared
           on reboot), keyed by an exported <code>FLOW_SESSION_ID</code> that
@@ -503,17 +543,17 @@
       </section>
 
       <section>
-        <h2>Configure a provider</h2>
-        <p style="color: var(--dim)">
+        <h2 data-i18n="h2.cfg">Configure a provider</h2>
+        <p style="color: var(--dim)" data-i18n="cfg.intro">
           agent-the-zsh speaks the Anthropic Messages protocol. The endpoint can
           be the first-party API or any compatible proxy (DeepSeek, GLM, a
           gateway). Config resolution precedence (first non-empty wins):
         </p>
 
-        <p class="demo-label" style="margin-top: 18px">
+        <p class="demo-label" style="margin-top: 18px" data-i18n="dl.cfg1">
           1. ~/.flow/settings.json (highest priority)
         </p>
-        <pre><span class="c"># DeepSeek (default)</span>
+        <pre><span class="c" data-i18n="cfg.c1"># DeepSeek (default)</span>
 {
   "provider": "anthropic",
   "base_url": "https://api.deepseek.com",
@@ -521,7 +561,7 @@
   "model": "deepseek-chat"
 }
 
-<span class="c"># Anthropic first-party</span>
+<span class="c" data-i18n="cfg.c2"># Anthropic first-party</span>
 {
   "provider": "anthropic",
   "base_url": "https://api.anthropic.com",
@@ -529,7 +569,7 @@
   "model": "claude-opus-4-6"
 }
 
-<span class="c"># OpenAI-compatible provider</span>
+<span class="c" data-i18n="cfg.c3"># OpenAI-compatible provider</span>
 {
   "provider": "openai",
   "base_url": "https://api.openai.com/v1",
@@ -537,26 +577,26 @@
   "model": "gpt-4o"
 }</pre>
 
-        <p class="demo-label" style="margin-top: 18px">
+        <p class="demo-label" style="margin-top: 18px" data-i18n="dl.cfg2">
           2. Process env (ad-hoc overrides)
         </p>
-        <pre><span class="c"># DeepSeek via env</span>
+        <pre><span class="c" data-i18n="cfg.c4"># DeepSeek via env</span>
 export ANTHROPIC_BASE_URL="https://api.deepseek.com"
 export ANTHROPIC_AUTH_TOKEN="sk-..."
 export ANTHROPIC_MODEL="deepseek-chat"
 
-<span class="c"># or Anthropic first-party</span>
+<span class="c" data-i18n="cfg.c5"># or Anthropic first-party</span>
 export ANTHROPIC_API_KEY="sk-ant-..."</pre>
 
-        <p class="demo-label" style="margin-top: 18px">
+        <p class="demo-label" style="margin-top: 18px" data-i18n="dl.cfg3">
           3. ~/.claude/settings.json (Claude Code compat)
         </p>
-        <p style="color: var(--dim)">
+        <p style="color: var(--dim)" data-i18n="cfg.claude">
           The <code>env</code> block is read as a fallback — an existing Claude
           Code setup just works with no extra config.
         </p>
 
-        <p style="color: var(--dim); margin-top: 14px">
+        <p style="color: var(--dim); margin-top: 14px" data-i18n="cfg.auto">
           If no model is specified, the daemon auto-discovers one from the
           provider's <code>/v1/models</code> endpoint. The discovered model is
           cached and shown on the right of your prompt. Check status with
@@ -565,10 +605,10 @@ export ANTHROPIC_API_KEY="sk-ant-..."</pre>
       </section>
 
       <section>
-        <h2>Install options</h2>
+        <h2 data-i18n="h2.install">Install options</h2>
         <table>
           <tr>
-            <td><b>One line</b></td>
+            <td data-i18n="inst.oneline"><b>One line</b></td>
             <td>
               <code
                 >curl -fsSL https://21stware.github.io/agent-the-zsh/install |
@@ -577,7 +617,7 @@ export ANTHROPIC_API_KEY="sk-ant-..."</pre>
             </td>
           </tr>
           <tr>
-            <td><b>From source</b></td>
+            <td data-i18n="inst.source"><b>From source</b></td>
             <td>
               <code
                 >git clone https://github.com/21stware/agent-the-zsh &amp;&amp;
@@ -586,15 +626,15 @@ export ANTHROPIC_API_KEY="sk-ant-..."</pre>
             </td>
           </tr>
           <tr>
-            <td><b>Activate</b></td>
-            <td>
+            <td data-i18n="inst.activate"><b>Activate</b></td>
+            <td data-i18n="inst.activate.d">
               <code>exec zsh</code> &nbsp;(new terminals pick it up
               automatically)
             </td>
           </tr>
           <tr>
-            <td><b>Uninstall</b></td>
-            <td>
+            <td data-i18n="inst.uninstall"><b>Uninstall</b></td>
+            <td data-i18n="inst.uninstall.d">
               <code>make uninstall</code> &nbsp;(or remove the
               <code># &gt;&gt;&gt; flow &gt;&gt;&gt;</code> block from
               <code>~/.zshrc</code>)
@@ -603,7 +643,7 @@ export ANTHROPIC_API_KEY="sk-ant-..."</pre>
         </table>
       </section>
 
-      <footer>
+      <footer data-i18n="footer">
         agent-the-zsh — a self-built zsh smart input layer.
         <a href="https://github.com/21stware/agent-the-zsh"
           >source &amp; docs on GitHub</a
@@ -627,6 +667,181 @@ export ANTHROPIC_API_KEY="sk-ant-..."</pre>
           }, 1500);
         });
       }
+
+      // --- i18n: English lives in the DOM; only Chinese overrides live here. ---
+      var I18N_ZH = {
+        "hero.tag":
+          "为 zsh 打造的智能输入层。命令即时执行；自然语言交给内联 agent 处理——就在你的提示符下方、在你自己的终端里、用你自己的工具。",
+        "hero.hint": "macOS 或 Linux · 需要 zsh · 然后运行 <kbd>exec zsh</kbd>",
+        "nav.how": "工作原理",
+        "h2.how": "一行输入，两条路径",
+        "dl.cmd": "Shell 命令 —— 即时执行，原样不动",
+        "dl.nl": "自然语言 —— agent 在行内作答",
+        "dl.multi": "多步骤任务 —— agent 规划、确认、执行",
+        "dl.danger": "危险操作 —— 受审查级别拦截",
+        "term.demo1":
+          '<span class="p">~/proj</span> git log --oneline -5                            <span class="r">(claude-opus-4-6)</span>\n' +
+          '<span class="ok">a1b2c3d feat: add streaming parse</span>\n' +
+          '<span class="ok">e4f5g6h fix: stderr silenced in widget</span>\n' +
+          '<span class="c"># 判定为命令，直接 accept-line，零延迟，不联网</span>',
+        "term.demo2":
+          '<span class="p">~/proj</span> 这个项目用了哪些依赖\n' +
+          '<span class="c">  dir ~/proj · review focused</span>\n' +
+          '  <span class="c">🧠 思考中</span>\n' +
+          '  <span class="c">  读取 go.mod 查看依赖……</span>\n' +
+          '  <span class="c">● bash: cat go.mod</span>\n' +
+          '  <span class="ok">  ✓</span> <span class="c">module github.com/21stware/agent-the-zsh</span>\n' +
+          '  <span class="c">    require (</span>\n' +
+          '  <span class="c">      mvdan.cc/sh/v3 v3.8.0</span>\n' +
+          '  <span class="c">      …</span>\n' +
+          '  <span class="c">    )</span>\n' +
+          '  本项目依赖：\n' +
+          '  - <strong>mvdan.cc/sh/v3</strong> —— 用于命令/自然语言判定的 shell 解析器\n' +
+          '  - 通过原始 HTTP 调用 Anthropic Messages API（无 SDK）\n' +
+          '  - Go 标准库（net/http、encoding/json）\n' +
+          '  <span class="c"># 你输入的文字留在原处；agent 的输出在下方</span>',
+        "term.demo3":
+          '<span class="p">~/proj</span> 把所有 .log 文件加入 .gitignore\n' +
+          '<span class="c">  dir ~/proj · review focused</span>\n' +
+          '  <span class="c">🧠 思考中</span>\n' +
+          '  <span class="c">  我需要检查当前的 .gitignore 并找出 .log 文件……</span>\n' +
+          "  <span class=\"c\">● bash: find . -name '*.log' | head -20</span>\n" +
+          '  <span class="ok">  ✓</span> <span class="c">app.log</span>\n' +
+          '  <span class="c">    debug.log</span>\n' +
+          '  <span class="c">    test.log</span>\n' +
+          '  <span class="c">● read_file: .gitignore</span>\n' +
+          '  <span class="ok">  ✓</span>\n' +
+          '  <span class="warn">⚠ 待确认 [低风险]</span>  <span class="c">edit: .gitignore（追加 *.log）</span>\n' +
+          '  <span class="c">  [y] 执行  [n] 拒绝  [a] 本任务全部允许  [s] 严格模式</span>\n' +
+          '  <span class="c">  > </span>y\n' +
+          '  <span class="ok">  ✓</span>\n' +
+          '  完成 —— <strong>*.log</strong> 已加入 .gitignore。',
+        "term.demo4":
+          '<span class="p">~/proj</span> 删除 dist 目录\n' +
+          '<span class="c">  dir ~/proj · review focused</span>\n' +
+          '  <span class="c">🧠 思考中</span>\n' +
+          '  <span class="c">  删除前先检查 dist/ 是否存在……</span>\n' +
+          '  <span class="c">● bash: ls -d dist 2>/dev/null</span>\n' +
+          '  <span class="ok">  ✓</span> <span class="c">dist/</span>\n' +
+          '  <span class="red">⚠ 待确认 [高风险]</span>  <span class="c">bash: rm -r dist</span>\n' +
+          '  <span class="c">  [y] 执行  [n] 拒绝  [a] 本任务全部允许  [s] 严格模式</span>\n' +
+          '  <span class="c">  > </span>n\n' +
+          '  <span class="c"># 破坏性操作始终由你掌控</span>',
+        "h2.what": "它能做什么",
+        "card1.h": "零延迟命令",
+        "card1.p":
+          "真正的 shell 命令运行起来就像没装 agent-the-zsh 一样 —— 判定完全在本地离线完成，绝不联网。",
+        "card2.h": "自然语言 → agent",
+        "card2.p":
+          "自然语言会交给一个内联 agent，它可以运行命令、完成多步骤任务，或直接作答 —— 并实时流式输出它的思考与结果。",
+        "card3.h": "你的输入被保留",
+        "card3.p":
+          "你输入的内容会留在你输入的位置。agent 在其下方运行 —— 绝不会悄悄改写你的输入行。",
+        "card4.h": "权限由你掌控",
+        "card4.p":
+          "读取操作自由执行；有副作用的操作受审查级别（<code>focused</code> / <code>strict</code> / <code>yolo</code>）拦截。用 <kbd>y</kbd>/<kbd>n</kbd>/<kbd>a</kbd>/<kbd>s</kbd> 确认。按 <kbd>a</kbd> 在本会话内持续生效 —— 不再重复询问。",
+        "card5.h": "多服务商配置",
+        "card5.p":
+          "<code>~/.flow/settings.json</code> 同时支持 Anthropic 与 OpenAI 兼容的服务商。可回退到 <code>~/.claude/settings.json</code>。无 SDK —— 原始 HTTP/JSON + SSE。",
+        "card6.h": "绝不让你的 shell 卡死",
+        "card6.p":
+          "如果守护进程宕机或变慢，会降级为普通 zsh。被误判的输入会被 <code>command_not_found_handler</code> 捕获并重新交给 agent。",
+        "h2.conv": "每个窗口一段对话",
+        "conv.intro":
+          "每个终端窗口就是一段连续的对话。提问、得到回答、再追问 —— agent 会自动记住该窗口里之前的对话轮次。打开新窗口即可获得干净的开始。",
+        "term.conv":
+          '<span class="p">~/proj</span> 运行测试，告诉我有没有失败的\n' +
+          '<span class="c">  dir ~/proj · review focused</span>\n' +
+          '  <span class="c">🧠 思考中</span>\n' +
+          '  <span class="c">  对所有包运行 go test……</span>\n' +
+          '  <span class="c">● bash: go test ./...</span>\n' +
+          '  <span class="ok">  ✓</span> <span class="c">ok  internal/classify  0.012s</span>\n' +
+          '  <span class="c">    ok  internal/config    0.008s</span>\n' +
+          '  <span class="c">    ok  internal/llm       0.003s</span>\n' +
+          '  全部测试通过 —— 没有失败。\n' +
+          '\n' +
+          '<span class="p">~/proj</span> 测试了哪些包\n' +
+          '<span class="c">  dir ~/proj · review focused</span>\n' +
+          '  根据上一次运行，共测试了三个包：\n' +
+          '  <strong>internal/classify</strong>、<strong>internal/config</strong> 和\n' +
+          '  <strong>internal/llm</strong> —— 全部通过。\n' +
+          '  <span class="c"># 记住了上一轮的测试结果</span>',
+        "row.tmp":
+          "创建一个全新的临时目录并 <code>cd</code> 进去 —— 当前窗口的临时工作区。",
+        "row.rsm":
+          "恢复之前某个窗口的对话。会显示一个方向键选择器；选中后即在此继续。<code>flowrsm &lt;id&gt;</code> 恢复指定的对话。",
+        "row.clear":
+          "重置当前窗口的对话（清空记录与审查级别）。<code>FLOW_FRESH=1</code> 可进行一次性的全新对话。",
+        "transcripts":
+          "对话记录存放在 <code>$TMPDIR/flow-&lt;uid&gt;/sessions/</code> 下（仅属主可读，重启后清除），以导出的 <code>FLOW_SESSION_ID</code> 为键，该值在 <code>exec zsh</code> 后依然保留。",
+        "h2.cfg": "配置服务商",
+        "cfg.intro":
+          "agent-the-zsh 使用 Anthropic Messages 协议。端点可以是官方 API，也可以是任意兼容的代理（DeepSeek、GLM、网关）。配置解析优先级（第一个非空者生效）：",
+        "dl.cfg1": "1. ~/.flow/settings.json（最高优先级）",
+        "dl.cfg2": "2. 进程环境变量（临时覆盖）",
+        "dl.cfg3": "3. ~/.claude/settings.json（兼容 Claude Code）",
+        "cfg.c1": "# DeepSeek（默认）",
+        "cfg.c2": "# Anthropic 官方",
+        "cfg.c3": "# OpenAI 兼容服务商",
+        "cfg.c4": "# 通过环境变量使用 DeepSeek",
+        "cfg.c5": "# 或使用 Anthropic 官方",
+        "cfg.claude":
+          "<code>env</code> 块会作为回退被读取 —— 已有的 Claude Code 配置无需任何额外设置即可使用。",
+        "cfg.auto":
+          "如果未指定模型，守护进程会从服务商的 <code>/v1/models</code> 端点自动发现一个。发现的模型会被缓存，并显示在提示符右侧。用 <code>flow-doctor</code> 查看状态。凭据绝不会被记录。",
+        "h2.install": "安装方式",
+        "inst.oneline": "<b>一行命令</b>",
+        "inst.source": "<b>从源码</b>",
+        "inst.activate": "<b>激活</b>",
+        "inst.activate.d": "<code>exec zsh</code> &nbsp;（新开的终端会自动启用）",
+        "inst.uninstall": "<b>卸载</b>",
+        "inst.uninstall.d":
+          "<code>make uninstall</code> &nbsp;（或从 <code>~/.zshrc</code> 中删除 <code># &gt;&gt;&gt; flow &gt;&gt;&gt;</code> 代码块）",
+        "footer":
+          'agent-the-zsh —— 自研的 zsh 智能输入层。\n        <a href="https://github.com/21stware/agent-the-zsh">GitHub 上的源码与文档</a>',
+      };
+      var META_ZH = {
+        title: "agent-the-zsh —— 为 zsh 打造的智能输入层",
+        desc: "在你自己的 zsh 里输入命令或自然语言。命令即时运行；自然语言交给内联 agent 处理。自研、无 SDK，可对接任意 Anthropic 兼容服务商。",
+      };
+      var i18nNodes = document.querySelectorAll("[data-i18n]");
+      var I18N_EN = {};
+      i18nNodes.forEach(function (el) {
+        I18N_EN[el.getAttribute("data-i18n")] = el.innerHTML;
+      });
+      var META_EN = {
+        title: document.title,
+        desc: (document.querySelector('meta[name="description"]') || {}).content,
+      };
+      function applyLang(lang) {
+        if (lang !== "zh") lang = "en";
+        var dict = lang === "zh" ? I18N_ZH : I18N_EN;
+        i18nNodes.forEach(function (el) {
+          var v = dict[el.getAttribute("data-i18n")];
+          if (v != null) el.innerHTML = v;
+        });
+        var meta = lang === "zh" ? META_ZH : META_EN;
+        document.documentElement.lang = lang === "zh" ? "zh-Hans" : "en";
+        document.title = meta.title;
+        var md = document.querySelector('meta[name="description"]');
+        if (md && meta.desc != null) md.setAttribute("content", meta.desc);
+        document.querySelectorAll(".lang-switch button").forEach(function (b) {
+          b.classList.toggle("active", b.getAttribute("data-lang") === lang);
+        });
+        try {
+          localStorage.setItem("lang", lang);
+        } catch (e) {}
+      }
+      var saved;
+      try {
+        saved = localStorage.getItem("lang");
+      } catch (e) {}
+      if (!saved) {
+        saved = (navigator.language || "").toLowerCase().indexOf("zh") === 0
+          ? "zh"
+          : "en";
+      }
+      applyLang(saved);
     </script>
   </body>
 </html>

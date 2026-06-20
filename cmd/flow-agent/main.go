@@ -9,7 +9,9 @@
 //	flow-agent            # reads the task from stdin
 //
 // Review level comes from FLOW_REVIEW (strict|focused|yolo, default focused)
-// and can be changed mid-task at an approval prompt (y/n/a/s).
+// and can be changed mid-task at an approval prompt (y/n/a/s). Pressing 'a'
+// (allow all) persists yolo mode for the session, so subsequent invocations
+// skip approval prompts until flowclear resets it.
 package main
 
 import (
@@ -102,7 +104,42 @@ func main() {
 	}
 	client := llm.New(cfg.APIKey, opts...)
 
-	model := cfg.Model // prefer the capable model for agent work
+	cwd, _ := os.Getwd()
+	sessionID := os.Getenv("FLOW_SESSION_ID")
+	level := agent.ParseReviewLevel(os.Getenv("FLOW_REVIEW"))
+	// A persisted session-level override (from pressing 'a' — allow all — in a
+	// prior invocation) takes precedence over the env default.
+	if saved := session.LoadLevel(sessionID); saved != "" {
+		level = agent.ParseReviewLevel(saved)
+	}
+
+	// Per-shell conversation transcript. FLOW_SESSION_ID keys the file (one shell
+	// window = one continuous conversation), so prior turns in THIS session are
+	// loaded by default. FLOW_FRESH=1 forces a one-off fresh turn; `flowclear`
+	// truncates the transcript to start the session's conversation over.
+	sessionFile, _ := session.Path(sessionID)
+	resume := os.Getenv("FLOW_FRESH") != "1"
+	// Cancel on Ctrl-C.
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	sigc := make(chan os.Signal, 1)
+	signal.Notify(sigc, syscall.SIGINT, syscall.SIGTERM)
+	go func() { <-sigc; fmt.Print("\n" + cDim + "interrupted" + cReset + "\n"); cancel() }()
+
+	r := newRunner(level, sessionID)
+	r.ctx = ctx
+
+	// Print the header immediately so the user sees feedback before any
+	// potentially slow model discovery or first network call.
+	fmt.Printf("%sdir %s · review %s%s\n",
+		cDim, cwd, level, cReset)
+
+	// Resolve the model: FLOW_MODEL (from the daemon's discovery) takes
+	// precedence, then config, then discover from the provider.
+	model := os.Getenv("FLOW_MODEL")
+	if model == "" {
+		model = cfg.Model
+	}
 	if model == "" {
 		model = cfg.FastModel
 	}
@@ -117,30 +154,9 @@ func main() {
 		model = m
 	}
 
-	cwd, _ := os.Getwd()
-	level := agent.ParseReviewLevel(os.Getenv("FLOW_REVIEW"))
-
-	// Per-shell conversation transcript. FLOW_SESSION_ID keys the file (one shell
-	// window = one continuous conversation), so prior turns in THIS session are
-	// loaded by default. FLOW_FRESH=1 forces a one-off fresh turn; `flowclear`
-	// truncates the transcript to start the session's conversation over.
-	sessionFile, _ := session.Path(os.Getenv("FLOW_SESSION_ID"))
-	resume := os.Getenv("FLOW_FRESH") != "1"
-	// Cancel on Ctrl-C.
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	sigc := make(chan os.Signal, 1)
-	signal.Notify(sigc, syscall.SIGINT, syscall.SIGTERM)
-	go func() { <-sigc; fmt.Print("\n" + cDim + "interrupted" + cReset + "\n"); cancel() }()
-
-	r := newRunner(level)
-
-	fmt.Printf("%s flow %s  %sdir %s · review %s%s\n\n",
-		cBold+cCyan, cReset, cDim, cwd, level, cReset)
-
 	loop := agent.New(agent.Config{
 		Client: client, Model: model, Cwd: cwd, Level: level,
-		SessionFile: sessionFile, SessionID: os.Getenv("FLOW_SESSION_ID"), Resume: resume,
+		SessionFile: sessionFile, SessionID: sessionID, Resume: resume,
 		Prompt: r.prompt,
 		Events: agent.Events{
 			OnText:       r.onText,

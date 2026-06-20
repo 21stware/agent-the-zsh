@@ -4,18 +4,30 @@
 // like worldbase.ai, etc.). The provider is described by: a base URL, an auth
 // credential (Bearer auth token OR x-api-key), and model names.
 //
-// Resolution precedence (first non-empty wins), matching Claude Code's own env
-// convention so an existing ~/.claude/settings.json just works:
-//  1. process environment
-//  2. the "env" block of ~/.claude/settings.json
+// Resolution precedence (first non-empty wins):
+//  1. process environment (ad-hoc overrides)
+//  2. ~/.flow/settings.json — structured config supporting both Anthropic and
+//     OpenAI-compatible providers (highest-priority config file)
+//  3. the "env" block of ~/.claude/settings.json (fallback, Claude Code compat)
 //
-// Recognized keys (env var name == settings.json env key):
+// Recognized env keys (env var name == ~/.claude/settings.json env key):
 //
 //	ANTHROPIC_BASE_URL          endpoint root (default https://api.anthropic.com)
 //	ANTHROPIC_AUTH_TOKEN        Bearer token (compatible proxies); takes auth precedence
 //	ANTHROPIC_API_KEY           x-api-key (first-party API)
 //	ANTHROPIC_MODEL             model for mode B (capable)
 //	ANTHROPIC_SMALL_FAST_MODEL  model for mode A (fast translation)
+//
+// ~/.flow/settings.json uses a flat structured format:
+//
+//	{
+//	  "provider":   "anthropic",     // or "openai"
+//	  "base_url":   "https://...",
+//	  "api_key":    "sk-...",
+//	  "auth_token": "...",
+//	  "model":      "...",
+//	  "fast_model": "..."
+//	}
 package config
 
 import (
@@ -24,8 +36,15 @@ import (
 	"path/filepath"
 )
 
+// Provider types supported by ~/.flow/settings.json.
+const (
+	ProviderAnthropic = "anthropic"
+	ProviderOpenAI    = "openai"
+)
+
 // Config is the resolved provider configuration.
 type Config struct {
+	Provider  string // ProviderAnthropic (default) or ProviderOpenAI
 	BaseURL   string
 	AuthToken string // Authorization: Bearer <token>; preferred when set
 	APIKey    string // x-api-key: <key>; first-party API
@@ -51,9 +70,68 @@ const (
 	DefaultBaseURL = "https://api.anthropic.com"
 )
 
-// Load resolves the configuration from the process environment, falling back to
-// ~/.claude/settings.json's env block for any key not set in the environment.
+// Load resolves the configuration. It tries ~/.flow/settings.json first
+// (structured, supports both Anthropic and OpenAI-compatible providers), then
+// falls back to the process environment + ~/.claude/settings.json env block.
 func Load() *Config {
+	// Highest-priority config file: ~/.flow/settings.json
+	if flow := loadFlowSettings(); flow != nil && (flow.APIKey != "" || flow.AuthToken != "") {
+		return loadFromFlow(flow)
+	}
+	// Fallback: env + ~/.claude/settings.json
+	return loadFromClaude()
+}
+
+// loadFromFlow builds a Config from ~/.flow/settings.json, with env overrides
+// for individual fields (ad-hoc testing/debugging without editing the file).
+func loadFromFlow(flow *flowSettings) *Config {
+	c := &Config{
+		Provider:  flow.Provider,
+		BaseURL:   flow.BaseURL,
+		AuthToken: flow.AuthToken,
+		APIKey:    flow.APIKey,
+		Model:     flow.Model,
+		FastModel: flow.FastModel,
+		Source:    "~/.flow/settings.json",
+	}
+	if c.Provider == "" {
+		c.Provider = ProviderAnthropic
+	}
+	if c.BaseURL == "" {
+		c.BaseURL = DefaultBaseURL
+	}
+	// Env overrides for individual fields.
+	if v := os.Getenv(envBaseURL); v != "" {
+		c.BaseURL = v
+	}
+	if v := os.Getenv(envAuthToken); v != "" {
+		c.AuthToken = v
+	}
+	if v := os.Getenv(envAPIKey); v != "" {
+		c.APIKey = v
+	}
+	if v := os.Getenv(envModel); v != "" {
+		c.Model = v
+	}
+	if v := os.Getenv(envFastModel); v != "" {
+		c.FastModel = v
+	}
+	// Bearer token takes precedence over API key when both are present.
+	if c.AuthToken != "" && c.APIKey != "" {
+		c.APIKey = ""
+	}
+	switch {
+	case c.AuthToken != "":
+		c.Source = "auth_token (~/.flow/settings.json)"
+	case c.APIKey != "":
+		c.Source = "api_key (~/.flow/settings.json)"
+	}
+	return c
+}
+
+// loadFromClaude is the legacy resolution path: env-first, then
+// ~/.claude/settings.json's env block.
+func loadFromClaude() *Config {
 	settings := loadSettingsEnv()
 
 	// getFrom returns a key's value from a specific source ("env" or
@@ -133,6 +211,7 @@ func Load() *Config {
 		}
 	}
 
+	c.Provider = ProviderAnthropic
 	switch {
 	case c.AuthToken != "":
 		c.Source = "ANTHROPIC_AUTH_TOKEN (" + tokSrc + ")"
@@ -162,4 +241,34 @@ func loadSettingsEnv() map[string]string {
 		return nil
 	}
 	return doc.Env
+}
+
+// flowSettings is the structured config from ~/.flow/settings.json.
+type flowSettings struct {
+	Provider  string `json:"provider"`   // "anthropic" (default) or "openai"
+	BaseURL   string `json:"base_url"`
+	APIKey    string `json:"api_key"`
+	AuthToken string `json:"auth_token"`
+	Model     string `json:"model"`
+	FastModel string `json:"fast_model"`
+}
+
+// loadFlowSettings reads ~/.flow/settings.json. Returns nil if the file is
+// absent or unparseable — config resolution degrades gracefully to the
+// ~/.claude/settings.json fallback.
+func loadFlowSettings() *flowSettings {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return nil
+	}
+	path := filepath.Join(home, ".flow", "settings.json")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil
+	}
+	var s flowSettings
+	if err := json.Unmarshal(data, &s); err != nil {
+		return nil
+	}
+	return &s
 }

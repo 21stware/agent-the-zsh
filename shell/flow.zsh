@@ -293,6 +293,14 @@ flow-accept-line() {
     _flow_clear_session
     local f=$(_flow_session_file)
     [[ -n $f && -f $f ]] && : > "$f"
+    # Also clear the persisted review-level override (e.g. yolo from pressing 'a').
+    local lvl
+    if [[ -n $XDG_RUNTIME_DIR ]]; then
+      lvl="$XDG_RUNTIME_DIR/flow/sessions/${FLOW_SESSION_ID}.level"
+    else
+      lvl="${TMPDIR:-/tmp}/flow-${UID}/sessions/${FLOW_SESSION_ID}.level"
+    fi
+    [[ -f $lvl ]] && rm -f "$lvl"
     _flow_clear_mark
     BUFFER=""
     POSTDISPLAY=$'\n'"flow: conversation cleared"
@@ -348,8 +356,7 @@ _flow_apply_reply() {
       # lets us write to the terminal from within the widget safely. FLOW_REVIEW
       # is passed through so the agent's permission gate uses the chosen level.
       zle -I
-      print               # move past the typed line
-      FLOW_TASK=$task FLOW_REVIEW=$FLOW_REVIEW "${FLOW_AGENT_CMD:-flow-agent}"
+      FLOW_TASK=$task FLOW_REVIEW=$FLOW_REVIEW FLOW_MODEL=$FLOW_MODEL "${FLOW_AGENT_CMD:-flow-agent}"
       # Done: clear the buffer and redraw a clean prompt.
       BUFFER=""
       CURSOR=0
@@ -398,12 +405,14 @@ _flow_query_info() {
 # prompt until the daemon reports a model (discovery may be async), then stops.
 # Set FLOW_RPROMPT=0 to disable.
 typeset -g FLOW_RPROMPT_DONE=
+typeset -g FLOW_MODEL=
 _flow_setup_rprompt() {
   [[ $FLOW_RPROMPT == 1 ]] || return 0
   [[ -n $FLOW_RPROMPT_DONE ]] && return 0
   local model=$(_flow_query_info 2>/dev/null)
   [[ -z $model ]] && return 0
   FLOW_RPROMPT_DONE=1
+  FLOW_MODEL=$model
   local seg="%F{244}(${model})%f"
   if [[ -n $RPROMPT && $RPROMPT != *"$seg"* ]]; then
     RPROMPT="$RPROMPT $seg"
@@ -413,3 +422,23 @@ _flow_setup_rprompt() {
 }
 autoload -Uz add-zsh-hook 2>/dev/null && add-zsh-hook precmd _flow_setup_rprompt
 _flow_setup_rprompt   # try immediately too
+
+# --- command_not_found_handler -----------------------------------------------
+# When the classifier says CMD but the command doesn't actually exist (e.g.
+# "delete xyz.md" where "delete" is not a known command, or pinyin like
+# "shanchu"), re-route the original input to the agent as a fallback. This
+# catches NL input that was misclassified as CMD by the stage-0 classifier.
+# Returns 127 (standard "not found") when flow is not active so non-flow
+# shells are unaffected.
+command_not_found_handler() {
+  [[ -n $FLOW_SESSION_ID ]] || return 127
+  local sock=$(_flow_socket_path)
+  [[ -S $sock ]] || return 127
+
+  local line="${(j: :)@}"
+  [[ -z $line ]] && return 127
+
+  print -r -- "flow: '$1' not found — routing to agent"
+  FLOW_TASK=$line FLOW_REVIEW=$FLOW_REVIEW FLOW_MODEL=$FLOW_MODEL "${FLOW_AGENT_CMD:-flow-agent}"
+  return $?
+}

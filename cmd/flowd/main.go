@@ -51,8 +51,8 @@ func main() {
 	srv := daemon.New()
 
 	// Resolve the LLM provider (first-party API or an Anthropic-compatible
-	// proxy: GLM, DeepSeek, a gateway). Config comes from the process env, then
-	// ~/.claude/settings.json.
+	// proxy: GLM, DeepSeek, a gateway). Config comes from ~/.flow/settings.json
+	// (highest priority), then the process env, then ~/.claude/settings.json.
 	// The daemon does only instant CMD-vs-NL classification. NL is handed to
 	// flow-agent (which does translation/routing/answering itself), so the
 	// daemon needs no LLM client — just whether a credential is configured, to
@@ -65,8 +65,8 @@ func main() {
 			model = cfg.FastModel
 		}
 		srv.SetAgentEnabled(true, model)
-		log.Printf("flowd: agent (NL) path enabled — endpoint=%s auth=%s model=%q",
-			cfg.BaseURL, cfg.Source, model)
+		log.Printf("flowd: agent (NL) path enabled — provider=%s endpoint=%s auth=%s model=%q",
+			cfg.Provider, cfg.BaseURL, cfg.Source, model)
 		// If no model is configured, discover one in the background (don't block
 		// startup) so the prompt can show a real name.
 		if model == "" {

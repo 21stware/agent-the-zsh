@@ -178,3 +178,163 @@ func TestEnvKeyMatchingEnvBaseURLWins(t *testing.T) {
 		t.Errorf("AuthToken = %q, want dropped", c.AuthToken)
 	}
 }
+
+// TestFlowSettingsPriority: ~/.flow/settings.json takes priority over
+// ~/.claude/settings.json when both exist and flow has credentials.
+func TestFlowSettingsPriority(t *testing.T) {
+	dir := t.TempDir()
+
+	// Create ~/.claude/settings.json with a token.
+	claudeDir := filepath.Join(dir, ".claude")
+	os.MkdirAll(claudeDir, 0o700)
+	os.WriteFile(filepath.Join(claudeDir, "settings.json"),
+		[]byte(`{"env":{"ANTHROPIC_AUTH_TOKEN":"claude-token","ANTHROPIC_BASE_URL":"https://claude.example"}}`), 0o600)
+
+	// Create ~/.flow/settings.json with a different token.
+	flowDir := filepath.Join(dir, ".flow")
+	os.MkdirAll(flowDir, 0o700)
+	os.WriteFile(filepath.Join(flowDir, "settings.json"),
+		[]byte(`{"provider":"anthropic","base_url":"https://flow.example","api_key":"flow-key","model":"flow-model"}`), 0o600)
+
+	t.Setenv("HOME", dir)
+	for _, k := range []string{"ANTHROPIC_BASE_URL", "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_API_KEY", "ANTHROPIC_MODEL", "ANTHROPIC_SMALL_FAST_MODEL"} {
+		os.Unsetenv(k)
+	}
+
+	c := Load()
+	if c.BaseURL != "https://flow.example" {
+		t.Errorf("BaseURL = %q, want flow.example", c.BaseURL)
+	}
+	if c.APIKey != "flow-key" {
+		t.Errorf("APIKey = %q, want flow-key", c.APIKey)
+	}
+	if c.AuthToken != "" {
+		t.Errorf("AuthToken = %q, want empty (flow uses api_key)", c.AuthToken)
+	}
+	if c.Model != "flow-model" {
+		t.Errorf("Model = %q, want flow-model", c.Model)
+	}
+	if c.Provider != ProviderAnthropic {
+		t.Errorf("Provider = %q, want %q", c.Provider, ProviderAnthropic)
+	}
+}
+
+// TestFlowSettingsOpenAI: ~/.flow/settings.json with provider "openai" is
+// loaded correctly with the OpenAI provider type.
+func TestFlowSettingsOpenAI(t *testing.T) {
+	dir := t.TempDir()
+	flowDir := filepath.Join(dir, ".flow")
+	os.MkdirAll(flowDir, 0o700)
+	os.WriteFile(filepath.Join(flowDir, "settings.json"),
+		[]byte(`{"provider":"openai","base_url":"https://api.openai.com/v1","api_key":"sk-oai","model":"gpt-4o","fast_model":"gpt-4o-mini"}`), 0o600)
+
+	t.Setenv("HOME", dir)
+	for _, k := range []string{"ANTHROPIC_BASE_URL", "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_API_KEY", "ANTHROPIC_MODEL", "ANTHROPIC_SMALL_FAST_MODEL"} {
+		os.Unsetenv(k)
+	}
+
+	c := Load()
+	if c.Provider != ProviderOpenAI {
+		t.Errorf("Provider = %q, want %q", c.Provider, ProviderOpenAI)
+	}
+	if c.BaseURL != "https://api.openai.com/v1" {
+		t.Errorf("BaseURL = %q", c.BaseURL)
+	}
+	if c.APIKey != "sk-oai" {
+		t.Errorf("APIKey = %q", c.APIKey)
+	}
+	if c.Model != "gpt-4o" {
+		t.Errorf("Model = %q", c.Model)
+	}
+	if c.FastModel != "gpt-4o-mini" {
+		t.Errorf("FastModel = %q", c.FastModel)
+	}
+	if !c.Enabled() {
+		t.Error("Enabled() = false, want true")
+	}
+}
+
+// TestFlowSettingsEnvOverride: env vars can override individual fields from
+// ~/.flow/settings.json for ad-hoc testing.
+func TestFlowSettingsEnvOverride(t *testing.T) {
+	dir := t.TempDir()
+	flowDir := filepath.Join(dir, ".flow")
+	os.MkdirAll(flowDir, 0o700)
+	os.WriteFile(filepath.Join(flowDir, "settings.json"),
+		[]byte(`{"provider":"anthropic","base_url":"https://flow.example","api_key":"flow-key","model":"flow-model"}`), 0o600)
+
+	t.Setenv("HOME", dir)
+	os.Unsetenv("ANTHROPIC_AUTH_TOKEN")
+	os.Unsetenv("ANTHROPIC_API_KEY")
+	os.Unsetenv("ANTHROPIC_SMALL_FAST_MODEL")
+	t.Setenv("ANTHROPIC_BASE_URL", "https://override.example")
+	t.Setenv("ANTHROPIC_MODEL", "override-model")
+
+	c := Load()
+	if c.BaseURL != "https://override.example" {
+		t.Errorf("BaseURL = %q, want env override", c.BaseURL)
+	}
+	if c.Model != "override-model" {
+		t.Errorf("Model = %q, want env override", c.Model)
+	}
+	if c.APIKey != "flow-key" {
+		t.Errorf("APIKey = %q, want flow-key (not overridden)", c.APIKey)
+	}
+}
+
+// TestFlowSettingsNoCredentialFallsBackToClaude: when ~/.flow/settings.json
+// exists but has no credentials, fall back to ~/.claude/settings.json.
+func TestFlowSettingsNoCredentialFallsBackToClaude(t *testing.T) {
+	dir := t.TempDir()
+
+	// ~/.flow/settings.json with no credentials.
+	flowDir := filepath.Join(dir, ".flow")
+	os.MkdirAll(flowDir, 0o700)
+	os.WriteFile(filepath.Join(flowDir, "settings.json"),
+		[]byte(`{"provider":"openai","base_url":"https://oai.example","model":"gpt-4o"}`), 0o600)
+
+	// ~/.claude/settings.json with a token.
+	claudeDir := filepath.Join(dir, ".claude")
+	os.MkdirAll(claudeDir, 0o700)
+	os.WriteFile(filepath.Join(claudeDir, "settings.json"),
+		[]byte(`{"env":{"ANTHROPIC_AUTH_TOKEN":"claude-token","ANTHROPIC_BASE_URL":"https://claude.example"}}`), 0o600)
+
+	t.Setenv("HOME", dir)
+	for _, k := range []string{"ANTHROPIC_BASE_URL", "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_API_KEY", "ANTHROPIC_MODEL", "ANTHROPIC_SMALL_FAST_MODEL"} {
+		os.Unsetenv(k)
+	}
+
+	c := Load()
+	if c.BaseURL != "https://claude.example" {
+		t.Errorf("BaseURL = %q, want claude.example (fallback)", c.BaseURL)
+	}
+	if c.AuthToken != "claude-token" {
+		t.Errorf("AuthToken = %q, want claude-token (fallback)", c.AuthToken)
+	}
+	if c.Provider != ProviderAnthropic {
+		t.Errorf("Provider = %q, want %q (claude fallback is always anthropic)", c.Provider, ProviderAnthropic)
+	}
+}
+
+// TestFlowSettingsDefaultProvider: when ~/.flow/settings.json omits the
+// provider field, it defaults to "anthropic".
+func TestFlowSettingsDefaultProvider(t *testing.T) {
+	dir := t.TempDir()
+	flowDir := filepath.Join(dir, ".flow")
+	os.MkdirAll(flowDir, 0o700)
+	os.WriteFile(filepath.Join(flowDir, "settings.json"),
+		[]byte(`{"api_key":"sk-test"}`), 0o600)
+
+	t.Setenv("HOME", dir)
+	for _, k := range []string{"ANTHROPIC_BASE_URL", "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_API_KEY", "ANTHROPIC_MODEL", "ANTHROPIC_SMALL_FAST_MODEL"} {
+		os.Unsetenv(k)
+	}
+
+	c := Load()
+	if c.Provider != ProviderAnthropic {
+		t.Errorf("Provider = %q, want default %q", c.Provider, ProviderAnthropic)
+	}
+	if c.BaseURL != DefaultBaseURL {
+		t.Errorf("BaseURL = %q, want default %q", c.BaseURL, DefaultBaseURL)
+	}
+}

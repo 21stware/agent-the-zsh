@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"context"
 	"fmt"
 	"os"
 	"strings"
@@ -10,6 +11,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/21stware/agent-the-zsh/internal/agent"
+	"github.com/21stware/agent-the-zsh/internal/session"
 )
 
 // runner renders the agent run on the TTY: an animated spinner while waiting,
@@ -29,13 +31,15 @@ type runner struct {
 	codeLang     string
 	codeBuf      strings.Builder
 	codePrinted  int      // terminal lines printed while streaming code (for rewind)
-	tableLines   []string
-	tablePrinted int      // terminal lines printed for current live table render
+	tableLines   []string // buffered table rows awaiting complete render
+
+	ctx       context.Context // set before loop.Run; used to cancel blocking reads
+	sessionID string          // FLOW_SESSION_ID, for persisting review-level overrides
 }
 
-func newRunner(level agent.ReviewLevel) *runner {
+func newRunner(level agent.ReviewLevel, sessionID string) *runner {
 	_ = level
-	return &runner{}
+	return &runner{sessionID: sessionID}
 }
 
 var spinnerFrames = []string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"}
@@ -121,9 +125,11 @@ func (r *runner) flushText() {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.closeThinkingLocked()
-	// Live-rendered table is already on screen; just reset tracking.
-	r.tableLines = nil
-	r.tablePrinted = 0
+	// Render any buffered table that was never flushed.
+	if len(r.tableLines) > 0 {
+		fmt.Println(renderMarkdown(strings.Join(r.tableLines, "\n")))
+		r.tableLines = nil
+	}
 	// Unclosed code block: rewind yellow lines and highlight.
 	if r.inCodeBlock && r.codeBuf.Len() > 0 {
 		clearLines(r.codePrinted)
@@ -140,8 +146,8 @@ func (r *runner) flushText() {
 }
 
 // renderBufferedLinesLocked emits every complete (newline-terminated) line.
-// Tables stream with per-row realignment (clearLines + rerender).
-// Code blocks stream immediately in yellow, then rewind+highlight on close.
+// Table rows are buffered and rendered as a block via glamour when the table
+// ends. Code blocks stream immediately in yellow, then rewind+highlight on close.
 func (r *runner) renderBufferedLinesLocked() {
 	s := r.textBuf.String()
 	for {
@@ -153,9 +159,11 @@ func (r *runner) renderBufferedLinesLocked() {
 		s = s[i+1:]
 
 		if strings.HasPrefix(line, "```") {
-			// Seal any open table before starting/ending a code block.
-			r.tableLines = nil
-			r.tablePrinted = 0
+			// Flush any buffered table before starting/ending a code block.
+			if len(r.tableLines) > 0 {
+				fmt.Println(renderMarkdown(strings.Join(r.tableLines, "\n")))
+				r.tableLines = nil
+			}
 			if !r.inCodeBlock {
 				r.inCodeBlock = true
 				r.codeLang = strings.TrimSpace(strings.TrimPrefix(line, "```"))
@@ -182,17 +190,15 @@ func (r *runner) renderBufferedLinesLocked() {
 		}
 
 		if isTableLine(line) {
-			clearLines(r.tablePrinted)
 			r.tableLines = append(r.tableLines, line)
-			rendered := renderTable(r.tableLines)
-			fmt.Print(rendered + "\n")
-			r.tablePrinted = strings.Count(rendered, "\n") + 1
 			continue
 		}
 
-		// Leaving table context — already live-rendered, just reset.
-		r.tableLines = nil
-		r.tablePrinted = 0
+		// Leaving table context — flush buffered table via glamour.
+		if len(r.tableLines) > 0 {
+			fmt.Println(renderMarkdown(strings.Join(r.tableLines, "\n")))
+			r.tableLines = nil
+		}
 
 		fmt.Println(renderMarkdownLine(line))
 	}
@@ -232,7 +238,8 @@ func (r *runner) onRejected(c agent.ToolCall) {
 }
 
 // prompt is the permission gate: render the pending call and read a y/n/a/s
-// decision from the TTY.
+// decision from the TTY. A terminal bell (\a) and OSC 777 notification are
+// emitted so the user is alerted even when the terminal is not focused.
 func (r *runner) prompt(c agent.ToolCall) agent.Approval {
 	r.pauseForOutput()
 	r.mu.Lock()
@@ -242,18 +249,22 @@ func (r *runner) prompt(c agent.ToolCall) agent.Approval {
 	if c.Risk == agent.RiskHigh {
 		riskCol = cRed
 	}
+	// Terminal notification: BEL + OSC 777 (supported by tmux, screen, etc.).
+	fmt.Print("\a")
+	fmt.Printf("\033]777;notify;flow-agent;Approval needed: %s\007", c.Summary)
 	fmt.Printf("\n%s⚠ approve [%s]%s  %s%s%s\n",
 		riskCol, c.Risk, cReset, cBold, c.Summary, cReset)
 	fmt.Printf("%s  [y] run  [n] reject  [a] allow all (this task)  [s] strict mode%s\n", cDim, cReset)
 	fmt.Printf("%s  > %s", cDim, cReset)
 
-	ans := readKey()
+	ans := r.readKey()
 	switch ans {
 	case "y", "Y", "":
 		r.startSpinner()
 		return agent.ApproveOnce
 	case "a", "A":
 		fmt.Printf("%s  (allowing all further actions this task)%s\n", cDim, cReset)
+		_ = session.SaveLevel(r.sessionID, "yolo")
 		r.startSpinner()
 		return agent.ApproveAll
 	case "s", "S":
@@ -266,13 +277,59 @@ func (r *runner) prompt(c agent.ToolCall) agent.Approval {
 	}
 }
 
-// readKey reads one line from the TTY. Defaults to "n" on EOF.
-func readKey() string {
-	sc := bufio.NewScanner(os.Stdin)
-	if sc.Scan() {
-		return strings.TrimSpace(sc.Text())
+// readKey reads one line from the controlling terminal (/dev/tty), falling
+// back to stdin when /dev/tty is unavailable. It is context-aware: if the
+// run is cancelled (e.g. Ctrl-C) while waiting for input, it returns "n"
+// immediately instead of hanging forever.
+//
+// When the agent is launched from the zsh widget (zle), the terminal is
+// typically in raw mode (no echo, no line buffering, Enter sends \r not \n).
+// We save the terminal state, switch to cooked mode (echo + icanon) so the
+// user can see what they type and Enter submits the line, then restore the
+// original state after reading.
+func (r *runner) readKey() string {
+	f, err := os.OpenFile("/dev/tty", os.O_RDWR, 0)
+	if err != nil {
+		f = os.Stdin // fallback (e.g. piped/non-interactive)
+	} else {
+		defer f.Close()
 	}
-	return "n"
+
+	// Save terminal state and switch to cooked mode for interactive input.
+	// sttyState/stty are defined in picker.go and use the stty command.
+	var saved string
+	if f != os.Stdin {
+		if s, err := sttyState(f); err == nil {
+			saved = s
+			_ = stty(f, "echo", "icanon")
+		}
+	}
+	defer func() {
+		if saved != "" {
+			_ = stty(f, saved)
+		}
+	}()
+
+	ch := make(chan string, 1)
+	go func() {
+		sc := bufio.NewScanner(f)
+		if sc.Scan() {
+			ch <- strings.TrimSpace(sc.Text())
+		} else {
+			ch <- "n"
+		}
+	}()
+
+	ctx := r.ctx
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	select {
+	case ans := <-ch:
+		return ans
+	case <-ctx.Done():
+		return "n"
+	}
 }
 
 // dimText wraps a string in the dim color (no reset, so a thinking block stays

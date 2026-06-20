@@ -157,6 +157,52 @@ type meta struct {
 	Cwd string `json:"cwd"`
 }
 
+// SaveLevel persists the review level for a session id in a sidecar
+// <id>.level file. This lets the "allow all" (yolo) choice survive across
+// separate flow-agent invocations within the same shell session. Best-effort;
+// a no-op when id is empty.
+func SaveLevel(id, level string) error {
+	if id == "" {
+		return nil
+	}
+	dir, err := Dir()
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(filepath.Join(dir, id+".level"), []byte(level), 0o600)
+}
+
+// LoadLevel reads the persisted review level for a session id. Returns "" if
+// no level file exists (the env/default level should be used).
+func LoadLevel(id string) string {
+	if id == "" {
+		return ""
+	}
+	dir, err := Dir()
+	if err != nil {
+		return ""
+	}
+	b, err := os.ReadFile(filepath.Join(dir, id+".level"))
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(b))
+}
+
+// ClearLevel removes the persisted review level for a session id, so a
+// flowclear resets the "allow all" state. Best-effort; a no-op when id is
+// empty or the file does not exist.
+func ClearLevel(id string) error {
+	if id == "" {
+		return nil
+	}
+	dir, err := Dir()
+	if err != nil {
+		return err
+	}
+	return os.Remove(filepath.Join(dir, id+".level"))
+}
+
 // Info summarizes one stored session for the resume picker.
 type Info struct {
 	ID       string // session id (file stem)

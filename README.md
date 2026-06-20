@@ -1,15 +1,16 @@
 # agent-the-zsh
 
-**flow** — a zsh smart input layer. You type in your own zsh as usual; on Enter:
+A smart input layer for zsh. You type in your own zsh as usual; on Enter:
 
-- **Shell command** → runs immediately, zero latency, exactly as if flow were
-  not installed.
+- **Shell command** → runs immediately, zero latency, exactly as if
+  agent-the-zsh were not installed.
 - **Natural language** → your typed text stays on its line and the agent runs
   inline below it: it translates+runs a single command, does multi-step work, or
   answers a question — streaming thinking and output after the prompt.
 
-flow deliberately does **not** emulate a terminal. It only takes over the
-judgment of a single input line: run it as a command, or hand it to the agent.
+agent-the-zsh deliberately does **not** emulate a terminal. It only takes over
+the judgment of a single input line: run it as a command, or hand it to the
+agent.
 
 ## Status
 
@@ -81,9 +82,9 @@ cross-compile with `GOOS=linux GOARCH=amd64 make dist`).
 
 ### Configure a provider
 
-flow speaks the Anthropic Messages protocol; the endpoint can be the first-party
-API or any compatible proxy (GLM, DeepSeek, a gateway). Config resolution
-precedence (first non-empty wins):
+agent-the-zsh speaks the Anthropic Messages protocol; the endpoint can be the
+first-party API or any compatible proxy (GLM, DeepSeek, a gateway). Config
+resolution precedence (first non-empty wins):
 
 1. **`~/.flow/settings.json`** — structured config, supports both `anthropic`
    and `openai` provider types:
@@ -106,7 +107,7 @@ precedence (first non-empty wins):
    Code, so an existing setup just works).
 
 Optional: `ANTHROPIC_MODEL` / `ANTHROPIC_SMALL_FAST_MODEL` pin the model
-(otherwise flow auto-discovers one from the provider's `/v1/models`). The
+(otherwise the daemon auto-discovers one from the provider's `/v1/models`). The
 discovered model is cached and passed to the agent via `FLOW_MODEL`, so
 subsequent invocations skip discovery. Credentials are never logged.
 
@@ -129,15 +130,15 @@ pkill flowd             # stop a running daemon
 Open a zsh prompt and type as usual:
 
 - a **shell command** (`git status`, `ls -la`) runs instantly, unchanged;
-- **natural language** (`这个目录是什么项目`, `delete the build dir`) keeps your
-  typed text on its line and runs the agent inline below it — it translates and
-  runs one command, does multi-step work, or answers, streaming its thinking and
-  output after the prompt;
+- **natural language** (`这个目录是什么项目`, `delete the build dir`, `把所有
+.o 文件清理掉`) keeps your typed text on its line and runs the agent inline
+  below it — it translates and runs one command, does multi-step work, or
+  answers, streaming its thinking and output after the prompt;
 - the configured model shows on the right of the prompt (disable with
   `FLOW_RPROMPT=0`);
 - `flowtmp` makes a fresh temp dir and `cd`s into it;
 - `flowrsm` continues a previous window's conversation in this one;
-- `flowclear` resets flow state and clears this session's conversation.
+- `flowclear` resets state and clears this session's conversation.
 
 ### Conversation per session
 
@@ -172,7 +173,7 @@ alerted even when the terminal is not focused.
 
 If the classifier misclassifies NL as a command (e.g. `delete xyz.md` where
 `delete` is not a known command), `command_not_found_handler` routes the input
-back to the agent automatically.
+back to the agent automatically — so nothing falls through the cracks.
 
 ## Try it without installing (UAT)
 
@@ -180,10 +181,9 @@ back to the agent automatically.
 ./shell/flow-uat
 ```
 
-Builds the binaries, starts a throwaway daemon (using your env or
-`~/.claude/settings.json`), and drops you into an interactive zsh with the widget
-loaded and isolated history. `exit` tears it all down. Useful for trying changes
-without touching your `~/.zshrc`.
+Builds the binaries, starts a throwaway daemon, and drops you into an
+interactive zsh with the widget loaded and isolated history. `exit` tears it
+all down. Useful for trying changes without touching your `~/.zshrc`.
 
 ## Architecture
 

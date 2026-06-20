@@ -3,7 +3,7 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>flow — a smart input layer for zsh</title>
+    <title>agent-the-zsh — a smart input layer for zsh</title>
     <meta
       name="description"
       content="Type commands or plain language in your own zsh. Commands run instantly; natural language is handled by an inline agent. Self-built, no SDK, works with any Anthropic-compatible provider."
@@ -65,8 +65,17 @@
         margin: 0 0 0.25em;
         letter-spacing: -0.02em;
       }
-      h1 .flow {
+      h1 .accent {
         color: var(--accent);
+      }
+      .demo-label {
+        color: var(--dim);
+        font-size: 0.85rem;
+        margin: 0 0 0.3em;
+        font-family: var(--mono);
+      }
+      .term .red {
+        color: var(--red);
       }
       .tag {
         color: var(--dim);
@@ -226,9 +235,7 @@
   <body>
     <div class="wrap">
       <header>
-        <h1>
-          <span class="flow">flow</span> <span class="badge">v0.2.0</span>
-        </h1>
+        <h1>agent-the-zsh <span class="badge">v0.2.0</span></h1>
         <p class="tag">
           A smart input layer for zsh. Commands run instantly. Plain language is
           handled by an inline agent — right below your prompt, in your own
@@ -254,25 +261,59 @@
 
       <section id="how">
         <h2>One input line, two paths</h2>
+
+        <p class="demo-label">Shell command — runs instantly, untouched</p>
         <pre
           class="term"
-        ><span class="p">~/proj</span> git status                                  <span class="r">(claude-opus-4-6)</span>
-<span class="c"># ↑ real command — runs instantly, zero latency, untouched</span>
+        ><span class="p">~/proj</span> git log --oneline -5                            <span class="r">(claude-opus-4-6)</span>
+<span class="ok">a1b2c3d feat: add streaming parse</span>
+<span class="ok">e4f5g6h fix: stderr silenced in widget</span>
+<span class="c"># ↑ classified as CMD → accept-line, zero latency, no network</span></pre>
 
-<span class="p">~/proj</span> 这个目录是什么项目
+        <p class="demo-label" style="margin-top: 24px">
+          Natural language — agent answers inline
+        </p>
+        <pre class="term"><span class="p">~/proj</span> 这个项目用了哪些依赖？
 <span class="c">  dir ~/proj · review focused</span>
-  🧠 <span class="c">thinking… checking the files here</span>
-  ● bash: ls -la &amp;&amp; cat README.md
-  <span class="ok">✓</span> <span class="c">README.md, cmd/, internal/, go.mod …</span>
-  A Go + zsh project: a smart shell input layer with a
-  self-built agent. <span class="c"># ← typed text stays; agent answers below</span>
+  🧠 <span class="c">reading go.mod…</span>
+  ● read_file: go.mod
+  <span class="ok">✓</span>
+  这个项目主要依赖：
+  - <span class="c">mvdan.cc/sh/v3</span> — shell parser (用于 CMD/NL 分类)
+  - <span class="c">anthropic Messages API</span> — LLM 调用 (raw HTTP, no SDK)
+  - 标准库 <span class="c">net/http, encoding/json</span>
+  <span class="c"># ← typed text stays on its line; agent output below</span></pre>
 
-<span class="p">~/proj</span> delete every .o file under build
+        <p class="demo-label" style="margin-top: 24px">
+          Multi-step work — agent plans, approves, executes
+        </p>
+        <pre
+          class="term"
+        ><span class="p">~/proj</span> 把所有 .log 文件加到 .gitignore
 <span class="c">  dir ~/proj · review focused</span>
-  ● bash: find build -name '*.o' -delete
-  <span class="warn">⚠ approve [high-risk]</span>  <span class="c">bash: find build -name '*.o' -delete</span>
+  🧠 <span class="c">checking current .gitignore and .log files…</span>
+  ● bash: find . -name '*.log' | head -20
+  <span class="ok">✓</span> <span class="c">app.log, debug.log, test.log</span>
+  ● read_file: .gitignore
+  <span class="ok">✓</span>
+  ● edit: .gitignore  <span class="c">(append *.log)</span>
+  <span class="warn">⚠ approve [low-risk]</span>  <span class="c">edit: .gitignore</span>
   <span class="c">  [y] run  [n] reject  [a] allow all  [s] strict mode</span>
-  <span class="c">  > </span>y<span class="ok"> ✓</span> <span class="c">removed 3 files</span></pre>
+  <span class="c">  > </span>y<span class="ok">✓</span> <span class="c">done — *.log added to .gitignore</span></pre>
+
+        <p class="demo-label" style="margin-top: 24px">
+          Dangerous action — gated by review level
+        </p>
+        <pre class="term"><span class="p">~/proj</span> 删掉 dist 目录
+<span class="c">  dir ~/proj · review focused</span>
+  🧠 <span class="c">checking if dist/ exists…</span>
+  ● bash: ls -d dist 2>/dev/null
+  <span class="ok">✓</span> <span class="c">dist/</span>
+  <span class="red">⚠ approve [high-risk]</span>  <span class="c">bash: rm -r dist</span>
+  <span class="c">  [y] run  [n] reject  [a] allow all  [s] strict mode</span>
+  <span class="c">  > </span>n
+  <span class="c">  rejected.</span>
+  <span class="c"># ← you stay in control of destructive actions</span></pre>
       </section>
 
       <section>
@@ -281,8 +322,9 @@
           <div class="card">
             <h3>Zero-latency commands</h3>
             <p>
-              Real shell commands run exactly as if flow weren't installed — the
-              classification is offline and local, never touches the network.
+              Real shell commands run exactly as if agent-the-zsh weren't
+              installed — the classification is offline and local, never touches
+              the network.
             </p>
           </div>
           <div class="card">
@@ -296,8 +338,8 @@
           <div class="card">
             <h3>Your text is preserved</h3>
             <p>
-              flow never silently rewrites your input line. What you typed stays
-              where you typed it; everything else prints below.
+              What you typed stays where you typed it. The agent runs below it —
+              nothing is silently rewritten into your input line.
             </p>
           </div>
           <div class="card">
@@ -323,7 +365,7 @@
           <div class="card">
             <h3>Never bricks your shell</h3>
             <p>
-              If the daemon is down or slow, flow degrades to plain zsh.
+              If the daemon is down or slow, it degrades to plain zsh.
               Misclassified input is caught by
               <code>command_not_found_handler</code> and routed back to the
               agent.
@@ -339,13 +381,21 @@
           answer, ask a follow-up — the agent remembers the earlier turns in
           that window automatically. Open a new window for a clean slate.
         </p>
-        <pre class="term"><span class="p">~/proj</span> 一加一等于几？
+        <pre
+          class="term"
+        ><span class="p">~/proj</span> go test ./... 跑一下看看有没有失败的
 <span class="c">  dir ~/proj · review focused</span>
-  2
+  🧠 <span class="c">running tests…</span>
+  ● bash: go test ./...
+  <span class="ok">✓</span> <span class="c">ok  internal/classify  0.012s</span>
+  <span class="c">    ok  internal/config    0.008s</span>
+  <span class="c">    ok  internal/llm       0.003s</span>
+  全部通过，没有失败的测试。
 
-<span class="p">~/proj</span> 然后平方
+<span class="p">~/proj</span> 把失败的包名告诉我
 <span class="c">  dir ~/proj · review focused</span>
-  4  <span class="c"># ← remembers the 2 from the previous turn</span></pre>
+  没有失败的包 — 上一步所有测试都通过了。
+  <span class="c"># ← remembers the test result from the previous turn</span></pre>
         <div class="grid">
           <div class="card">
             <h3><code>flowtmp</code></h3>
@@ -441,7 +491,7 @@
       </section>
 
       <footer>
-        flow · agent-the-zsh — a self-built zsh smart input layer.
+        agent-the-zsh — a self-built zsh smart input layer.
         <a href="https://github.com/21stware/agent-the-zsh"
           >source &amp; docs on GitHub</a
         >

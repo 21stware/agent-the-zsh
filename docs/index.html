@@ -86,6 +86,7 @@
       .install {
         margin: 34px auto 8px;
         max-width: 640px;
+        position: relative;
       }
       .install code {
         display: block;
@@ -93,11 +94,37 @@
         border: 1px solid var(--line);
         border-radius: 10px;
         padding: 16px 18px;
+        padding-right: 56px;
         font-family: var(--mono);
         font-size: 0.95rem;
         text-align: left;
         overflow-x: auto;
         white-space: nowrap;
+      }
+      .copy-btn {
+        position: absolute;
+        top: 50%;
+        right: 8px;
+        transform: translateY(-50%);
+        background: var(--panel);
+        border: 1px solid var(--line);
+        border-radius: 6px;
+        padding: 5px 10px;
+        font-size: 0.8rem;
+        font-family: var(--mono);
+        color: var(--dim);
+        cursor: pointer;
+        transition:
+          color 0.15s,
+          border-color 0.15s;
+      }
+      .copy-btn:hover {
+        color: var(--accent);
+        border-color: var(--accent);
+      }
+      .copy-btn.copied {
+        color: var(--green);
+        border-color: var(--green);
       }
       .install .hint {
         color: var(--dim);
@@ -243,10 +270,11 @@
         </p>
 
         <div class="install">
-          <code
+          <code id="install-cmd"
             >curl -fsSL https://21stware.github.io/agent-the-zsh/install |
             bash</code
           >
+          <button class="copy-btn" onclick="copyInstall()">copy</button>
           <div class="hint">
             macOS or Linux · needs zsh · then run <kbd>exec zsh</kbd>
           </div>
@@ -511,5 +539,19 @@
         >
       </footer>
     </div>
+    <script>
+      function copyInstall() {
+        var cmd = document.getElementById("install-cmd").textContent.trim();
+        navigator.clipboard.writeText(cmd).then(function () {
+          var btn = document.querySelector(".copy-btn");
+          btn.textContent = "copied";
+          btn.classList.add("copied");
+          setTimeout(function () {
+            btn.textContent = "copy";
+            btn.classList.remove("copied");
+          }, 1500);
+        });
+      }
+    </script>
   </body>
 </html>

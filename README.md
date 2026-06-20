@@ -13,36 +13,29 @@ judgment of a single input line: run it as a command, or hand it to the agent.
 
 ## Status
 
-- **Step 1 — offline classifier + accuracy baseline** ✅
-  Stage-0 rule cascade (`internal/classify`). Baseline on nl2bash + tldr +
-  hand-built adversarials: **98.5% overall, 0% dangerous (command→NL) errors.**
-- **Step 2 — widget + daemon + zero-latency passthrough** ✅
-  `flowd` daemon classifies each line over a unix socket; the zsh widget
-  (`shell/flow.zsh`) accepts commands immediately and degrades to plain zsh if
-  the daemon is unavailable. Local round-trip ~70µs.
-- **Step 3 — NL handling** ✅
-  Self-built Anthropic client (`internal/llm`: raw HTTP/JSON + SSE, no SDK).
-  Natural language is handed to the agent (mode B); the agent decides whether to
-  run one command, do multi-step work, or answer a question. No API key →
-  NL degrades to running the line as-is; the command path never touches the
-  network.
-- Step 4 — agent permission gate ✅
-  The agent's per-tool-call gate enforces the review level: read-only tools run
-  optimistically; side-effecting ones are gated (focused asks only on high-risk;
-  strict asks on everything; yolo never asks). `command_not_found` is plain zsh.
-- Mode B — self-built agent loop ✅
-  The daemon does only instant CMD-vs-NL classification (zero latency, no
-  network). A command runs as-is; natural language is handed to the agent. The
-  agent (`cmd/flow-agent`, foreground TTY) runs **inline below your typed line**
-  — translation is just one of its moves: it may run a single command, do
-  multi-step work, or answer a question, streaming thinking + output after the
-  prompt. Tool-use loop (bash/read_file/write_file/edit/grep) in the current
-  directory, with a per-tool-call permission gate: reads are optimistic,
-  side-effecting calls are gated by a review level (strict / focused / yolo;
-  default focused asks only on high-risk: rm, git push, sudo, writes outside the
-  tree, …). At an approval prompt: y=run, n=reject, a=allow-all-this-task,
-  s=switch-to-strict. `FLOW_REVIEW` sets the level; `FLOW_AGENT_CMD` points the
-  widget at the agent binary.
+- **Offline classifier** ✅ — Stage-0 rule cascade (`internal/classify`).
+  Baseline on nl2bash + tldr + adversarials: **98.5% overall, 0% dangerous
+  (command→NL) errors.**
+- **Widget + daemon** ✅ — `flowd` classifies each line over a unix socket;
+  the zsh widget accepts commands immediately and degrades to plain zsh if the
+  daemon is unavailable. Local round-trip ~70µs.
+- **Self-built LLM client** ✅ — Raw HTTP/JSON + SSE, no SDK
+  (`internal/llm`). Works with the first-party Anthropic API or any
+  compatible proxy (GLM, DeepSeek, a gateway).
+- **Agent loop** ✅ — `cmd/flow-agent` runs **inline below your typed line**.
+  Tool-use loop (bash/read_file/write_file/edit/grep) in the cwd, with a
+  per-tool-call permission gate. Reads are optimistic; side-effecting calls are
+  gated by a review level (strict / focused / yolo; default focused asks only on
+  high-risk: rm, git push, sudo, writes outside the tree, …).
+- **Multi-provider config** ✅ — `~/.flow/settings.json` supports both
+  Anthropic and OpenAI-compatible providers. Falls back to
+  `~/.claude/settings.json` (Claude Code compat).
+- **Session continuity** ✅ — Each terminal window is one continuous
+  conversation. `flowrsm` resumes a previous window's conversation;
+  `flowclear` resets.
+- **Terminal interaction** ✅ — Approval prompts switch to cooked mode for
+  reliable input. Terminal bell + OSC 777 notification on dangerous actions.
+  `command_not_found_handler` routes misclassified NL back to the agent.
 
 ## Install
 
@@ -89,22 +82,33 @@ cross-compile with `GOOS=linux GOARCH=amd64 make dist`).
 ### Configure a provider
 
 flow speaks the Anthropic Messages protocol; the endpoint can be the first-party
-API or any compatible proxy (GLM, DeepSeek, a gateway). Config is read from the
-process env first, then `~/.claude/settings.json`'s `env` block (same convention
-as Claude Code), so an existing Claude Code setup just works. Set **one** of:
+API or any compatible proxy (GLM, DeepSeek, a gateway). Config resolution
+precedence (first non-empty wins):
 
-```sh
-# compatible proxy (Bearer auth)
-export ANTHROPIC_BASE_URL="https://your-proxy.example"
-export ANTHROPIC_AUTH_TOKEN="sk-..."
-
-# or first-party API (x-api-key)
-export ANTHROPIC_API_KEY="sk-ant-..."
-```
+1. **`~/.flow/settings.json`** — structured config, supports both `anthropic`
+   and `openai` provider types:
+   ```json
+   {
+     "provider": "anthropic",
+     "base_url": "https://api.worldbase.ai",
+     "auth_token": "sk-...",
+     "model": "claude-opus-4-6"
+   }
+   ```
+2. **Process env** — ad-hoc overrides without editing the file:
+   ```sh
+   export ANTHROPIC_BASE_URL="https://your-proxy.example"
+   export ANTHROPIC_AUTH_TOKEN="sk-..."
+   # or first-party API:
+   export ANTHROPIC_API_KEY="sk-ant-..."
+   ```
+3. **`~/.claude/settings.json`** — the `env` block (same convention as Claude
+   Code, so an existing setup just works).
 
 Optional: `ANTHROPIC_MODEL` / `ANTHROPIC_SMALL_FAST_MODEL` pin the model
-(otherwise flow auto-discovers one from the provider's `/v1/models`). Credentials
-are read from the environment and never logged.
+(otherwise flow auto-discovers one from the provider's `/v1/models`). The
+discovered model is cached and passed to the agent via `FLOW_MODEL`, so
+subsequent invocations skip discovery. Credentials are never logged.
 
 Check everything resolved correctly (prints credential fingerprints, never the
 secret, and probes the endpoint):
@@ -151,7 +155,6 @@ and every turn is appended to a per-session JSONL transcript under
   specific past session directly.
 - `FLOW_FRESH=1` (env) makes a single turn ignore prior history.
 
-
 Review level (how much the agent confirms before side-effecting actions):
 
 ```sh
@@ -161,7 +164,15 @@ export FLOW_REVIEW=yolo      # never ask
 ```
 
 At an approval prompt: `y` run · `n` reject · `a` allow all (this task) · `s`
-switch to strict.
+switch to strict. Pressing `a` persists yolo mode for the session, so
+subsequent invocations skip approval prompts until `flowclear` resets it.
+Approval prompts switch the terminal to cooked mode (echo + line buffering) for
+reliable input, and emit a terminal bell + OSC 777 notification so you're
+alerted even when the terminal is not focused.
+
+If the classifier misclassifies NL as a command (e.g. `delete xyz.md` where
+`delete` is not a known command), `command_not_found_handler` routes the input
+back to the agent automatically.
 
 ## Try it without installing (UAT)
 
@@ -187,9 +198,12 @@ flow-agent (foreground CLI, has the TTY)
   self-built Anthropic client (raw HTTP/JSON + SSE, no SDK)
   tool-use loop: bash / read_file / write_file / edit / grep, in the cwd
   per-tool permission gate keyed to FLOW_REVIEW
+  session-level yolo persistence (.level sidecar)
+  command_not_found_handler: misclassified NL → agent fallback
 ```
 
 Design constraints (non-negotiable):
+
 1. **Command path zero latency** — a CMD verdict accepts immediately; the daemon
    never touches the network for it.
 2. **Bias to command** — when ambiguous, treat as a command. Misrouting a
@@ -209,4 +223,3 @@ make test      # go test ./...
 make fmt vet   # format + vet
 ./shell/flow-uat   # interactive smoke test
 ```
-

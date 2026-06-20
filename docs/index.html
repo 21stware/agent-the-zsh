@@ -505,21 +505,62 @@
       <section>
         <h2>Configure a provider</h2>
         <p style="color: var(--dim)">
-          Highest-priority config file: <code>~/.flow/settings.json</code> —
-          structured, supports both Anthropic and OpenAI-compatible providers:
+          agent-the-zsh speaks the Anthropic Messages protocol. The endpoint can
+          be the first-party API or any compatible proxy (DeepSeek, GLM, a
+          gateway). Config resolution precedence (first non-empty wins):
         </p>
-        <pre><span class="c"># ~/.flow/settings.json</span>
+
+        <p class="demo-label" style="margin-top: 18px">
+          1. ~/.flow/settings.json (highest priority)
+        </p>
+        <pre><span class="c"># DeepSeek (default)</span>
 {
   "provider": "anthropic",
-  "base_url": "https://api.worldbase.ai",
+  "base_url": "https://api.deepseek.com",
   "auth_token": "sk-...",
+  "model": "deepseek-chat"
+}
+
+<span class="c"># Anthropic first-party</span>
+{
+  "provider": "anthropic",
+  "base_url": "https://api.anthropic.com",
+  "api_key": "sk-ant-...",
   "model": "claude-opus-4-6"
+}
+
+<span class="c"># OpenAI-compatible provider</span>
+{
+  "provider": "openai",
+  "base_url": "https://api.openai.com/v1",
+  "api_key": "sk-...",
+  "model": "gpt-4o"
 }</pre>
+
+        <p class="demo-label" style="margin-top: 18px">
+          2. Process env (ad-hoc overrides)
+        </p>
+        <pre><span class="c"># DeepSeek via env</span>
+export ANTHROPIC_BASE_URL="https://api.deepseek.com"
+export ANTHROPIC_AUTH_TOKEN="sk-..."
+export ANTHROPIC_MODEL="deepseek-chat"
+
+<span class="c"># or Anthropic first-party</span>
+export ANTHROPIC_API_KEY="sk-ant-..."</pre>
+
+        <p class="demo-label" style="margin-top: 18px">
+          3. ~/.claude/settings.json (Claude Code compat)
+        </p>
         <p style="color: var(--dim)">
-          Falls back to process env, then
-          <code>~/.claude/settings.json</code> (Claude Code compat). The
-          discovered model is cached and shown on the right of your prompt.
-          Check status with <code>flow-doctor</code>.
+          The <code>env</code> block is read as a fallback — an existing Claude
+          Code setup just works with no extra config.
+        </p>
+
+        <p style="color: var(--dim); margin-top: 14px">
+          If no model is specified, the daemon auto-discovers one from the
+          provider's <code>/v1/models</code> endpoint. The discovered model is
+          cached and shown on the right of your prompt. Check status with
+          <code>flow-doctor</code>. Credentials are never logged.
         </p>
       </section>
 

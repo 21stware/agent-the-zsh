@@ -246,3 +246,39 @@ func countLabel(all []sample, lab Label, source string) int {
 	}
 	return n
 }
+
+// TestMultiLineCommands ensures multi-line shell input is always classified as
+// CMD. In zsh, multi-line $BUFFER only occurs for incomplete shell constructs
+// (line continuations, for/if/while blocks, heredocs, function definitions).
+// Natural language is always single-line.
+func TestMultiLineCommands(t *testing.T) {
+	c := New(knownCommandsForTest)
+
+	cases := []struct {
+		input  string
+		reason string
+	}{
+		{"echo hello \\\nworld", "line continuation"},
+		{"for i in 1 2 3; do\n  echo $i\ndone", "for loop"},
+		{"if [ -f file ]; then\n  rm file\nfi", "if block"},
+		{"while true; do\n  echo hi\ndone", "while loop"},
+		{"case $x in\n  a) echo a ;;\n  b) echo b ;;\nesac", "case block"},
+		{"foo() {\n  echo bar\n}", "function definition"},
+		{"echo hello\necho world", "two commands"},
+		{"git add .\ngit commit -m \"msg\"\ngit push", "three commands"},
+		{"cat <<EOF\nhello\nworld\nEOF", "heredoc"},
+		{"docker run -d \\\n  --name myapp \\\n  -p 8080:80 \\\n  nginx:latest", "docker with continuations"},
+		{"echo \"hello\nworld\"", "newline in quotes"},
+		{"# comment\necho hello", "comment + command"},
+	}
+
+	for _, tc := range cases {
+		got := c.Classify(tc.input)
+		if got.Label != CMD {
+			t.Errorf("multi-line [%s] %q: got %s, want CMD (reason=%s)", tc.reason, tc.input, got.Label, got.Reason)
+		}
+		if got.Reason != "multi-line" {
+			t.Errorf("multi-line [%s] %q: reason=%s, want multi-line", tc.reason, tc.input, got.Reason)
+		}
+	}
+}

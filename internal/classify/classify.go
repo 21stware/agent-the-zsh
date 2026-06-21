@@ -79,6 +79,15 @@ func (c *Classifier) Classify(input string) Result {
 		return Result{CMD, "empty"}
 	}
 
+	// Multi-line input (newline in the trimmed string) is always shell syntax:
+	// line continuations (\), for/if/while/case blocks, heredocs, function
+	// definitions, etc. Natural language in zsh is always single-line — the
+	// widget only intercepts accept-line, and zsh only produces multi-line
+	// $BUFFER for incomplete shell constructs.
+	if strings.Contains(s, "\n") {
+		return Result{CMD, "multi-line"}
+	}
+
 	first, structured, parseOK := c.firstWord(s)
 
 	// Structured shell with no ambiguity: assignments, keywords, subshells,

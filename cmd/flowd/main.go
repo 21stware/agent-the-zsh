@@ -70,6 +70,7 @@ func main() {
 		// If no model is configured, discover one in the background (don't block
 		// startup) so the prompt can show a real name.
 		if model == "" {
+			log.Printf("flowd: no model configured — set \"model\" in ~/.flow/settings.json or ANTHROPIC_MODEL env to avoid startup discovery delay")
 			go func() {
 				if m := discoverModel(cfg); m != "" {
 					srv.SetAgentEnabled(true, m)
@@ -79,6 +80,7 @@ func main() {
 		}
 	} else {
 		log.Printf("flowd: no LLM credential (ANTHROPIC_AUTH_TOKEN/API_KEY) — NL degrades to running the line as-is")
+		log.Printf("flowd: to enable, configure ~/.flow/settings.json or set ANTHROPIC_AUTH_TOKEN / ANTHROPIC_API_KEY; run flow-doctor for diagnostics")
 	}
 
 	// Graceful shutdown: closing the unix listener removes the socket file.

@@ -95,7 +95,9 @@ func main() {
 
 	cfg := config.Load()
 	if !cfg.Enabled() {
-		fmt.Fprintln(os.Stderr, "flow-agent: no LLM credential configured (ANTHROPIC_AUTH_TOKEN/API_KEY). See flow-doctor.")
+		fmt.Fprintln(os.Stderr, "flow-agent: no LLM credential configured (ANTHROPIC_AUTH_TOKEN/API_KEY).")
+		fmt.Fprintln(os.Stderr, "flow-agent: to configure, set credentials in ~/.flow/settings.json or export ANTHROPIC_AUTH_TOKEN / ANTHROPIC_API_KEY")
+		fmt.Fprintln(os.Stderr, "flow-agent: run flow-doctor for diagnostics")
 		os.Exit(1)
 	}
 	opts := []llm.Option{llm.WithBaseURL(cfg.BaseURL)}
@@ -151,7 +153,8 @@ func main() {
 		// capable tier (opus/sonnet) since agent work is correctness-sensitive.
 		m, err := pickCapableModel(client)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "flow-agent: no model configured and discovery failed (%v); set ANTHROPIC_MODEL.\n", err)
+			fmt.Fprintf(os.Stderr, "flow-agent: no model configured and discovery failed (%v).\n", err)
+			fmt.Fprintln(os.Stderr, "flow-agent: set \"model\" in ~/.flow/settings.json or export ANTHROPIC_MODEL to specify a model directly")
 			os.Exit(1)
 		}
 		model = m

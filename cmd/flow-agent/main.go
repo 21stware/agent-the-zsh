@@ -134,7 +134,7 @@ func main() {
 	r := newRunner(level, sessionID)
 	r.ctx = ctx
 
-	// Print the header immediately so the user sees feedback before any
+	// Print a minimal header immediately so the user sees feedback before any
 	// potentially slow model discovery or first network call.
 	fmt.Printf("%sdir %s · review %s%s\n",
 		cDim, cwd, level, cReset)
@@ -160,6 +160,14 @@ func main() {
 		model = m
 	}
 
+	// Print the task header with model name now that model is resolved.
+	taskPreview := task
+	if len(taskPreview) > 80 {
+		run := []rune(taskPreview)
+		taskPreview = string(run[:77]) + "..."
+	}
+	fmt.Printf("%s%s%s %s\n", cDim, model, cReset, taskPreview)
+
 	loop := agent.New(agent.Config{
 		Client: client, Model: model, Cwd: cwd, Level: level,
 		SessionFile: sessionFile, SessionID: sessionID, Resume: resume,
@@ -179,9 +187,17 @@ func main() {
 	r.flushText()
 	fmt.Println()
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "%sflow-agent: %v%s\n", cRed, err, cReset)
+		// Structured error output: a prominent ✗ failed marker followed by
+		// the error detail, dimmed and indented so the message stands apart
+		// from the agent's narration above.
+		errStr := err.Error()
+		fmt.Printf("%s✗ failed%s\n", cRed, cReset)
+		for _, line := range strings.Split(strings.TrimRight(errStr, "\n"), "\n") {
+			fmt.Printf("%s  %s%s\n", cDim, line, cReset)
+		}
 		os.Exit(1)
 	}
+	fmt.Printf("%s✓ done%s\n", cGreen, cReset)
 	_ = final // already streamed via OnText
 }
 

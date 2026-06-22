@@ -208,7 +208,7 @@ func (r *runner) renderBufferedLinesLocked() {
 
 func (r *runner) closeThinkingLocked() {
 	if r.thinkOpen {
-		fmt.Print(cReset + "\n")
+		fmt.Print(cReset + "\n" + cDim + "─── end thinking ───" + cReset + "\n")
 		r.thinkOpen = false
 	}
 }
@@ -218,7 +218,7 @@ func (r *runner) onToolStart(c agent.ToolCall) {
 	r.mu.Lock()
 	r.closeThinkingLocked()
 	r.mu.Unlock()
-	fmt.Printf("%s● %s%s\n", cDim, c.Summary, cReset)
+	fmt.Printf("%s▸ %s%s%s\n", cCyan, c.Summary, cReset, "")
 }
 
 func (r *runner) onToolResult(c agent.ToolCall, result string, isErr bool) {
@@ -226,14 +226,14 @@ func (r *runner) onToolResult(c agent.ToolCall, result string, isErr bool) {
 	if isErr {
 		mark, col = "✗", cRed
 	}
-	fmt.Printf("%s  %s%s %s\n", col, mark, cReset, dimIndent(previewResult(result, isErr)))
+	fmt.Printf("%s  └ %s%s%s %s\n", cDim, col, mark, cReset, dimIndent(previewResult(result, isErr)))
 	// Resume the spinner: the next model turn is about to stream.
 	r.startSpinner()
 }
 
 func (r *runner) onRejected(c agent.ToolCall) {
 	r.pauseForOutput()
-	fmt.Printf("%s✗ rejected: %s%s\n", cRed, c.Summary, cReset)
+	fmt.Printf("%s  └ %s✗ rejected:%s %s%s\n", cDim, cRed, cReset, c.Summary, cReset)
 	r.startSpinner()
 }
 
@@ -254,7 +254,8 @@ func (r *runner) prompt(c agent.ToolCall) agent.Approval {
 	fmt.Printf("\033]777;notify;flow-agent;Approval needed: %s\007", c.Summary)
 	fmt.Printf("\n%s⚠ approve [%s]%s  %s%s%s\n",
 		riskCol, c.Risk, cReset, cBold, c.Summary, cReset)
-	fmt.Printf("%s  [y] run  [n] reject  [a] allow all (this task)  [s] strict mode%s\n", cDim, cReset)
+	fmt.Printf("%s  %s[y]%s run  %s[n]%s reject  %s[a]%s allow all (this task)  %s[s]%s strict mode%s\n",
+		cDim, cBold+cCyan, cDim, cBold+cCyan, cDim, cBold+cCyan, cDim, cBold+cCyan, cDim, cReset)
 	fmt.Printf("%s  > %s", cDim, cReset)
 
 	ans := r.readKey()

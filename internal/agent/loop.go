@@ -19,7 +19,8 @@ You complete the user's task by using the provided tools (bash, read_file, write
 - Prefer the dedicated file tools (read_file/write_file/edit/grep/list_dir/multi_edit/glob) over bash for file work.
 - Some tool calls require user approval; if one is rejected, adapt — do not retry it verbatim.
 - Be concise in your narration. When the task is done, give a one or two sentence summary and stop.
-- If the task is actually just a question, answer it directly without tools.`
+- If the task is actually just a question, answer it directly without tools.
+- If the user's input looks like an incomplete shell command (e.g. unclosed quote, missing argument), point it out and suggest the completed command instead of analyzing files or running partial commands.`
 
 // PromptFunc is the permission gate. The loop calls it before every tool call
 // the policy flags as DecideAsk. It returns the user's decision. The host

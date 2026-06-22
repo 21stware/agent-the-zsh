@@ -97,8 +97,36 @@ func (c *Classifier) Classify(input string) Result {
 	}
 
 	// A parse failure (unbalanced quotes, stray bytes) is unusual for a real
-	// command. Treat it as a weak NL hint but still require an NL signal.
+	// command. But it can also happen for incomplete commands (unclosed quotes)
+	// which should NEVER be treated as NL. We check two strong CMD signals:
+	//   1. The first word is a known command (manually extracted, since the
+	//      parser failed) — this means the user typed a real command with a
+	//      syntax error (e.g. unclosed quote), not natural language.
+	//   2. There is an unclosed quote — the input is an incomplete command
+	//      that zsh would normally continue with PS2.
 	if !parseOK {
+		// Extract the first word manually (split on whitespace). A parse
+		// failure with a known first word (including grayzone verbs like
+		// make/find) is a strong signal: the user typed a real command with a
+		// syntax error (e.g. unclosed quote, stray byte), not NL.
+		manualFirst := firstToken(s)
+		if manualFirst != "" && c.known[manualFirst] {
+			return Result{CMD, "parse-fail+known-command"}
+		}
+		// Unclosed quote is a strong signal of an incomplete command.
+		if hasUnclosedQuote(s) {
+			// If the first word looks command-like (path, flag, etc.), lean CMD.
+			if manualFirst != "" && looksCommandy(manualFirst) {
+				return Result{CMD, "parse-fail+unclosed-quote"}
+			}
+			// Check if any other token outside quotes is a known command (e.g.
+			// "please git commit -m 'unclosed" — "git" is a known command).
+			for _, tok := range tokensOutsideQuotes(s) {
+				if c.known[tok] {
+					return Result{CMD, "parse-fail+unclosed-quote+known-cmd"}
+				}
+			}
+		}
 		if hasStrongNLSignal(s) {
 			return Result{NL, "parse-fail+nl-signal"}
 		}

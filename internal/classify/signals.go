@@ -5,6 +5,48 @@ import (
 	"unicode"
 )
 
+// firstToken returns the first whitespace-delimited token of s, stripped of
+// surrounding quotes. Used as a fallback when the parser fails.
+func firstToken(s string) string {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return ""
+	}
+	// Split on first whitespace.
+	idx := strings.IndexFunc(s, unicode.IsSpace)
+	tok := s
+	if idx >= 0 {
+		tok = s[:idx]
+	}
+	// Strip surrounding quotes.
+	tok = strings.Trim(tok, `"'`)
+	return tok
+}
+
+// hasUnclosedQuote reports whether s has an unclosed quoted string, indicating
+// an incomplete command. Single quotes inside double-quoted strings (and vice
+// versa) are correctly handled.
+func hasUnclosedQuote(s string) bool {
+	var inSingle, inDouble bool
+	for i := 0; i < len(s); i++ {
+		switch s[i] {
+		case '\\':
+			if inDouble { // backslash escape only works inside double quotes
+				i++
+			}
+		case '\'':
+			if !inDouble {
+				inSingle = !inSingle
+			}
+		case '"':
+			if !inSingle {
+				inDouble = !inDouble
+			}
+		}
+	}
+	return inSingle || inDouble
+}
+
 // grayzoneVerbs are command names that are also common English words. When one
 // of these is installed AND appears as the first word, we cannot decide from
 // the first word alone; we inspect the argument portion. This set is the

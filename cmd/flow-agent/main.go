@@ -134,11 +134,6 @@ func main() {
 	r := newRunner(level, sessionID)
 	r.ctx = ctx
 
-	// Print a minimal header immediately so the user sees feedback before any
-	// potentially slow model discovery or first network call.
-	fmt.Printf("%sdir %s · review %s%s\n",
-		cDim, cwd, level, cReset)
-
 	// Resolve the model: FLOW_MODEL (from the daemon's discovery) takes
 	// precedence, then config, then discover from the provider.
 	model := os.Getenv("FLOW_MODEL")
@@ -160,13 +155,9 @@ func main() {
 		model = m
 	}
 
-	// Print the task header with model name now that model is resolved.
-	taskPreview := task
-	if len(taskPreview) > 80 {
-		run := []rune(taskPreview)
-		taskPreview = string(run[:77]) + "..."
-	}
-	fmt.Printf("%s%s%s %s\n", cDim, model, cReset, taskPreview)
+	// Print the header: review level · model · working directory.
+	fmt.Printf("%sreview %s · %s · %s%s\n",
+		cDim, level, model, cwd, cReset)
 
 	loop := agent.New(agent.Config{
 		Client: client, Model: model, Cwd: cwd, Level: level,

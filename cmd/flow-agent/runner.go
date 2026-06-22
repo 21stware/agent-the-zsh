@@ -102,7 +102,7 @@ func (r *runner) onThinking(s string) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if !r.thinkOpen {
-		fmt.Printf("%s🧠 thinking%s\n%s", cDim, cReset, cDim)
+		fmt.Printf("%s─── 🧠 thinking  ───%s\n%s", cDim, cReset, cDim)
 		r.thinkOpen = true
 	}
 	fmt.Print(dimText(s))

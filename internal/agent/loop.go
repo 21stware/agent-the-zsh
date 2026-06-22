@@ -13,10 +13,10 @@ import (
 // tools, then stops. It is told the working directory and to be concise.
 const systemPromptTmpl = `You are flow's agent: a hands-on coding/shell assistant operating inside the user's terminal, in the working directory %s.
 
-You complete the user's task by using the provided tools (bash, read_file, write_file, edit, grep). Guidelines:
+You complete the user's task by using the provided tools (bash, read_file, write_file, edit, grep, list_dir, multi_edit, glob). Guidelines:
 - Take real actions with tools; don't just describe what to do.
 - Work in small, verifiable steps. Read before you edit. After changes, verify (build/test/inspect) when relevant.
-- Prefer the dedicated file tools (read_file/write_file/edit/grep) over bash for file work.
+- Prefer the dedicated file tools (read_file/write_file/edit/grep/list_dir/multi_edit/glob) over bash for file work.
 - Some tool calls require user approval; if one is rejected, adapt — do not retry it verbatim.
 - Be concise in your narration. When the task is done, give a one or two sentence summary and stop.
 - If the task is actually just a question, answer it directly without tools.`
@@ -120,6 +120,11 @@ func New(cfg Config) *Loop {
 	}
 }
 
+// contextBudget is the approximate byte budget for conversation history.
+// When the total size of messages exceeds this, older tool_result blocks are
+// truncated to a short summary, keeping recent turns intact.
+const contextBudget = 120_000 // ~30k tokens; leaves room for the response
+
 // Run executes the task to completion (end_turn), the max-turn cap, or ctx
 // cancellation. It returns the final assistant text and any fatal error.
 func (l *Loop) Run(ctx context.Context, task string) (string, error) {
@@ -145,6 +150,11 @@ func (l *Loop) Run(ctx context.Context, task string) (string, error) {
 
 	var lastText string
 	for turn := 0; turn < l.maxTurns; turn++ {
+		// Compress older history to stay within the context budget. Recent
+		// turns (the last 6 messages) are always kept intact so the model has
+		// full context for its current step.
+		msgs = compressHistory(msgs, contextBudget)
+
 		req := llm.Request{
 			Model:     l.model,
 			MaxTokens: 8192,
@@ -244,4 +254,59 @@ func (l *Loop) askApproval(call ToolCall) Approval {
 		return Reject
 	}
 	return l.prompt(call)
+}
+
+// compressHistory trunates older tool_result content blocks to keep the total
+// conversation size within budget. The most recent `keepRecent` messages are
+// always preserved intact. Older tool_result blocks have their content replaced
+// with a truncated summary. The returned slice is a new slice; the original is
+// not mutated.
+func compressHistory(msgs []llm.Message, budget int) []llm.Message {
+	const keepRecent = 6 // messages at the end kept fully intact
+	const truncLen = 500  // bytes kept from old tool results
+
+	total := 0
+	for _, m := range msgs {
+		total += messageSize(m)
+	}
+	if total <= budget || len(msgs) <= keepRecent {
+		return msgs
+	}
+
+	out := make([]llm.Message, len(msgs))
+	copy(out, msgs)
+
+	cutoff := len(out) - keepRecent
+	for i := 0; i < cutoff; i++ {
+		// Deep copy the Content slice so we don't mutate the original.
+		out[i].Content = append([]llm.ContentBlock(nil), out[i].Content...)
+		for j, blk := range out[i].Content {
+			if blk.Type == "tool_result" && len(blk.Content) > truncLen {
+				out[i].Content[j].Content = truncateMid(blk.Content, truncLen)
+			}
+		}
+	}
+	return out
+}
+
+// messageSize estimates the byte size of a message for budgeting.
+func messageSize(m llm.Message) int {
+	n := 0
+	for _, b := range m.Content {
+		n += len(b.Text)
+		n += len(b.Content)
+		n += len(b.Input)
+	}
+	return n
+}
+
+// truncateMid keeps the first n/2 and last n/2 bytes of s, with a marker in
+// the middle. Used to compress old tool results.
+func truncateMid(s string, n int) string {
+	if len(s) <= n {
+		return s
+	}
+	head := n / 2
+	tail := n - head
+	return s[:head] + "\n…[compressed, " + fmt.Sprintf("%d", len(s)-n) + " bytes omitted]…\n" + s[len(s)-tail:]
 }

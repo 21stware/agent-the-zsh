@@ -99,6 +99,9 @@ func main() {
 		os.Exit(1)
 	}
 	opts := []llm.Option{llm.WithBaseURL(cfg.BaseURL)}
+	if cfg.Provider == config.ProviderOpenAI {
+		opts = append(opts, llm.WithProvider("openai"))
+	}
 	if cfg.AuthToken != "" {
 		opts = append(opts, llm.WithAuthToken(cfg.AuthToken))
 	}

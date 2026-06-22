@@ -332,8 +332,9 @@ func (r *runner) readKey() string {
 	}
 }
 
-// dimText wraps a string in the dim color (no reset, so a thinking block stays
-// dim across deltas; the block is closed explicitly).
+// dimText passes through the thinking text unchanged. The dim style is applied
+// at the block level (onThinking opens with cDim, closeThinkingLocked resets),
+// so individual deltas inherit the active dim span without per-delta reset.
 func dimText(s string) string { return s }
 
 // Preview budgets (in bytes) for tool output shown to the user. The model

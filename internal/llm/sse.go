@@ -75,6 +75,11 @@ type streamAssembler struct {
 	resp    Response
 	blocks  map[int]*blockBuilder
 	onEvent func(StreamEvent)
+
+	// OpenAI adapter state (unused for native Anthropic streams).
+	started       bool // message_start sent
+	textBlockOpen bool // text block at index 0 is open
+	nextToolIndex int  // next tool_use block index (starts at 1)
 }
 
 type blockBuilder struct {
@@ -87,8 +92,9 @@ type blockBuilder struct {
 
 func newAssembler(onEvent func(StreamEvent)) *streamAssembler {
 	return &streamAssembler{
-		blocks:  map[int]*blockBuilder{},
-		onEvent: onEvent,
+		blocks:        map[int]*blockBuilder{},
+		onEvent:       onEvent,
+		nextToolIndex: 1, // index 0 reserved for text block
 	}
 }
 

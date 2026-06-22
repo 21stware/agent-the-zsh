@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -31,7 +32,8 @@ type Tool struct {
 }
 
 // DefaultTools returns the mode-B tool set: bash, read_file, write_file, edit,
-// grep. maxOutput bounds captured output to keep the context manageable.
+// grep, list_dir, multi_edit, glob. maxOutput bounds captured output to keep
+// the context manageable.
 func DefaultTools() map[string]*Tool {
 	tools := map[string]*Tool{
 		"bash":       bashTool(),
@@ -39,13 +41,16 @@ func DefaultTools() map[string]*Tool {
 		"write_file": writeFileTool(),
 		"edit":       editTool(),
 		"grep":       grepTool(),
+		"list_dir":   listDirTool(),
+		"multi_edit": multiEditTool(),
+		"glob":       globTool(),
 	}
 	return tools
 }
 
 // Defs returns the tool definitions in a stable order for the API request.
 func Defs(tools map[string]*Tool) []llm.Tool {
-	order := []string{"bash", "read_file", "write_file", "edit", "grep"}
+	order := []string{"bash", "read_file", "write_file", "edit", "grep", "list_dir", "multi_edit", "glob"}
 	var out []llm.Tool
 	for _, name := range order {
 		if t := tools[name]; t != nil {
@@ -322,6 +327,239 @@ func grepTool() *Tool {
 			return out, false
 		},
 	}
+}
+
+// --- list_dir ---
+
+func listDirTool() *Tool {
+	return &Tool{
+		Def: llm.Tool{
+			Name:        "list_dir",
+			Description: "List the contents of a directory. Returns entries with their type (file/dir) and size. Path is relative to the working directory unless absolute (default: working directory).",
+			InputSchema: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"path": map[string]any{
+						"type":        "string",
+						"description": "Directory to list (default: working directory).",
+					},
+				},
+				"required": []string{},
+			},
+		},
+		Risk:    func(json.RawMessage) Risk { return RiskReadOnly },
+		Summary: func(args json.RawMessage) string { return "list_dir: " + argStr(args, "path") },
+		Run: func(_ context.Context, cwd string, args json.RawMessage) (string, bool) {
+			p := argStr(args, "path")
+			if p == "" {
+				p = "."
+			}
+			full := resolve(cwd, p)
+			entries, err := os.ReadDir(full)
+			if err != nil {
+				return "list error: " + err.Error(), true
+			}
+			var b strings.Builder
+			for _, e := range entries {
+				info, err := e.Info()
+				size := int64(-1)
+				if err == nil {
+					size = info.Size()
+				}
+				typ := "file"
+				if e.IsDir() {
+					typ = "dir"
+				}
+				fmt.Fprintf(&b, "%s\t%s\t%d\n", typ, e.Name(), size)
+			}
+			return strings.TrimRight(b.String(), "\n"), false
+		},
+	}
+}
+
+// --- multi_edit ---
+
+func multiEditTool() *Tool {
+	return &Tool{
+		Def: llm.Tool{
+			Name: "multi_edit",
+			Description: "Apply multiple find-and-replace edits to a single file in one operation. " +
+				"Each edit's old_string must appear exactly once in the file. Edits are applied in order.",
+			InputSchema: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"path": map[string]any{"type": "string", "description": "File to edit."},
+					"edits": map[string]any{
+						"type": "array",
+						"description": "Array of {old_string, new_string} edit operations, applied in order.",
+						"items": map[string]any{
+							"type": "object",
+							"properties": map[string]any{
+								"old_string": map[string]any{"type": "string", "description": "Exact text to replace (must be unique in the file)."},
+								"new_string": map[string]any{"type": "string", "description": "Replacement text."},
+							},
+							"required": []string{"old_string", "new_string"},
+						},
+					},
+				},
+				"required": []string{"path", "edits"},
+			},
+		},
+		Risk:    func(args json.RawMessage) Risk { return pathWriteRisk(argStr(args, "path")) },
+		Summary: func(args json.RawMessage) string { return "multi_edit: " + argStr(args, "path") },
+		Run: func(_ context.Context, cwd string, args json.RawMessage) (string, bool) {
+			var a struct {
+				Path  string `json:"path"`
+				Edits []struct {
+					OldString string `json:"old_string"`
+					NewString string `json:"new_string"`
+				} `json:"edits"`
+			}
+			if err := json.Unmarshal(args, &a); err != nil {
+				return "invalid arguments: " + err.Error(), true
+			}
+			if a.Path == "" {
+				return "missing path", true
+			}
+			if len(a.Edits) == 0 {
+				return "no edits provided", true
+			}
+			full := resolve(cwd, a.Path)
+			b, err := os.ReadFile(full)
+			if err != nil {
+				return "read error: " + err.Error(), true
+			}
+			content := string(b)
+			for i, e := range a.Edits {
+				if e.OldString == "" {
+					return fmt.Sprintf("edit %d: old_string is required", i), true
+				}
+				n := strings.Count(content, e.OldString)
+				if n == 0 {
+					return fmt.Sprintf("edit %d: old_string not found in file", i), true
+				}
+				if n > 1 {
+					return fmt.Sprintf("edit %d: old_string appears %d times; it must be unique — add surrounding context", i, n), true
+				}
+				content = strings.Replace(content, e.OldString, e.NewString, 1)
+			}
+			if err := os.WriteFile(full, []byte(content), 0o644); err != nil {
+				return "write error: " + err.Error(), true
+			}
+			return fmt.Sprintf("applied %d edits to %s", len(a.Edits), a.Path), false
+		},
+	}
+}
+
+// --- glob ---
+
+func globTool() *Tool {
+	return &Tool{
+		Def: llm.Tool{
+			Name:        "glob",
+			Description: "Find files by name pattern (supports * and ** globs). Returns matching file paths relative to the working directory. Uses filepath.Glob for single-star patterns and walks recursively for double-star patterns.",
+			InputSchema: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"pattern": map[string]any{
+						"type":        "string",
+						"description": "Glob pattern (e.g. \"*.go\", \"**/*.ts\", \"src/**/*.py\").",
+					},
+					"path": map[string]any{
+						"type":        "string",
+						"description": "Base directory to search from (default: working directory).",
+					},
+				},
+				"required": []string{"pattern"},
+			},
+		},
+		Risk:    func(json.RawMessage) Risk { return RiskReadOnly },
+		Summary: func(args json.RawMessage) string { return "glob: " + argStr(args, "pattern") },
+		Run: func(ctx context.Context, cwd string, args json.RawMessage) (string, bool) {
+			pattern := argStr(args, "pattern")
+			if pattern == "" {
+				return "missing pattern", true
+			}
+			base := argStr(args, "path")
+			if base == "" {
+				base = "."
+			}
+			baseDir := resolve(cwd, base)
+
+			var matches []string
+			if strings.Contains(pattern, "**") {
+				// Recursive glob: walk the tree and match.
+				walkErr := filepath.WalkDir(baseDir, func(path string, d os.DirEntry, err error) error {
+					if err != nil {
+						return nil // skip unreadable dirs
+					}
+					if d.IsDir() {
+						return nil
+					}
+					rel, err := filepath.Rel(baseDir, path)
+					if err != nil {
+						return nil
+					}
+					if globMatch(pattern, rel) {
+						matches = append(matches, rel)
+					}
+					return nil
+				})
+				if walkErr != nil {
+					return "walk error: " + walkErr.Error(), true
+				}
+			} else {
+				// Single-level glob.
+				absPattern := filepath.Join(baseDir, pattern)
+				globMatches, err := filepath.Glob(absPattern)
+				if err != nil {
+					return "glob error: " + err.Error(), true
+				}
+				for _, m := range globMatches {
+					rel, err := filepath.Rel(baseDir, m)
+					if err == nil {
+						matches = append(matches, rel)
+					}
+				}
+			}
+			if len(matches) == 0 {
+				return "[no matches]", false
+			}
+			sort.Strings(matches)
+			return strings.Join(matches, "\n"), false
+		},
+	}
+}
+
+// globMatch checks if a file path matches a glob pattern containing **.
+// ** matches any number of path segments (including zero).
+func globMatch(pattern, path string) bool {
+	patSegs := strings.Split(pattern, "/")
+	pathSegs := strings.Split(path, "/")
+	return matchSegs(patSegs, pathSegs)
+}
+
+func matchSegs(patSegs, pathSegs []string) bool {
+	if len(patSegs) == 0 {
+		return len(pathSegs) == 0
+	}
+	if patSegs[0] == "**" {
+		// ** matches zero or more segments
+		for i := 0; i <= len(pathSegs); i++ {
+			if matchSegs(patSegs[1:], pathSegs[i:]) {
+				return true
+			}
+		}
+		return false
+	}
+	if len(pathSegs) == 0 {
+		return false
+	}
+	matched, _ := filepath.Match(patSegs[0], pathSegs[0])
+	if !matched {
+		return false
+	}
+	return matchSegs(patSegs[1:], pathSegs[1:])
 }
 
 // --- helpers ---
